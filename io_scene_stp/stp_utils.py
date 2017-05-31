@@ -48,6 +48,7 @@ def read_stp_line(f):
     line = ""
     while (line == "" or line[-1] != ";"):
         line = line  +read_stp_single_line(f)
+        line = line + "HOlA;"
     return line[:-1]  #remove ';'
 
 def get_instance_number(str):
@@ -181,50 +182,50 @@ def get_advanced_face(instance):
     return data[index]
 
 
-# Retuns de verts of an edge loop
+# Retuns verts of an edge loop
 def get_edge_loop_verts(edge_loop):
-	edges = []
-	verts = []
-	
-	for ed in edge_loop["oriented_edges"]:
-		edges.append([
+    edges = []
+    verts = []
+
+    for ed in edge_loop["oriented_edges"]:
+        edges.append([
             ed["edge_curve"]["vertex_point_1"]["vertex_id"],
             ed["edge_curve"]["vertex_point_2"]["vertex_id"]
-		])
+        ])
                 
-	ordered_edges = []
-	ordered_edges.append(edges[0])
-	edges.remove(edges[0])
-	
-	ok = True
-	while len(edges) and ok:
-		ok = False
-		for ed in edges:
-			if (ed[1] == ordered_edges[-1][1]):
-				#swap
- 				ed[0], ed[1] = ed[1], ed[0]
-				          
-			if (ed[0] == ordered_edges[-1][1]):
-				ordered_edges.append(ed)
-				edges.remove(ed)
-				ok = True
-				break
-			           
-	if not ok:
-		print ("ERROR: incorrect loop")        
-		             
-	if (ordered_edges[0][0] != ordered_edges[-1][1]):
-		print ("ERROR: incorrect loop, not closed")     
-
-	for ed in ordered_edges:
-		if (not ed[0] in verts):
-			verts.append(ed[0])
-        
-		if (not ed[1] in verts):
-			verts.append(ed[1])
-			
-	return verts
+    ordered_edges = []
+    ordered_edges.append(edges[0])
+    edges.remove(edges[0])
     
+    ok = True
+    while len(edges) and ok:
+        ok = False
+        for ed in edges:
+            if (ed[1] == ordered_edges[-1][1]):
+                #swap
+                 ed[0], ed[1] = ed[1], ed[0]
+                
+            if (ed[0] == ordered_edges[-1][1]):
+                ordered_edges.append(ed)
+                edges.remove(ed)
+                ok = True
+                break
+
+    if not ok:
+        print ("ERROR: incorrect loop")        
+                     
+    if (ordered_edges[0][0] != ordered_edges[-1][1]):
+        print ("ERROR: incorrect loop, not closed")     
+
+    for ed in ordered_edges:
+        if (not ed[0] in verts):
+            verts.append(ed[0])
+
+        if (not ed[1] in verts):
+            verts.append(ed[1])
+
+    return verts
+
     
 #X = FACE_BOUND('',#19,.F.);
 def get_face_bound(instance):
@@ -406,8 +407,9 @@ def read_stp(filepath):
     if (line == "ISO-10303-21"):
         print ("Reading ISO-10303-21 file")
     else:
+        print (line)
         print ("Not recognized " + line + "- abort")
-        return         
+        return
 
     line = read_stp_line(f)
     if (line == "HEADER"):
@@ -428,8 +430,9 @@ if __name__ == '__main__':
     import sys
     import bpy
 
-    filepaths = sys.argv[sys.argv.index('--') + 1:]
-
-    for filepath in filepaths:
-        read_stp(filepath)
+    #filepaths = sys.argv[sys.argv.index('--') + 1:]
+    
+    #for filepath in filepaths:
+    #    read_stp(filepath)
         
+    read_stp("/home/jaume/downloads/SIEM-CONJ-L00025.stp")
