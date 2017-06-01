@@ -29,10 +29,7 @@ blender --python stp_utils.py -- file1.stl file2.stl file3.stl ...
 import re
 import bpy
 
-offset = -1
-names = []  # Instance name
-lines = []  # Instance file line
-params = [] # Instance params struct
+instances = []
 data = []   # Instance blender data
 
 vertexs = [] # Mesh Vertices
@@ -42,30 +39,32 @@ faces = [] # Mesh Faces
 ### COMMON FUNCTION ###
 
 def read_stp_single_line(f):
-    return f.readline().decode("utf-8")[:-1]  #remove last '\n'    
+    return f.readline().decode("utf-8").strip()    
 
 def read_stp_line(f):
     line = ""
     while (line == "" or line[-1] != ";"):
         line = line  +read_stp_single_line(f)
-        line = line + "HOlA;"
     return line[:-1]  #remove ';'
 
 def get_instance_number(str):
     return int(str[1:])  #removes '#'
 
-def get_instance_index(str):
-    global offset
-    return get_instance_number(str) - offset;
+def add_instance (line, name, params, data, number):
+    global instances;
+    id = get_instance_number(number);
+    while (len(instances) < id): 
+        instances.append({"name" : ""})
+    instances.insert(id,{"name" : name, "params" : params,  "line" : line, "data" : data, "number" : number}) 
 
-def get_instance_id(index):
-    global offset
-    return "#" + str(index+offset)
+def get_instance(number):
+    global instances
+    instance = instances[get_instance_number(number)]
+    if (number != instance["number"]):
+        print ("Error: Expected " + number + ", found " + instance["number"])
+    
+    return instance
 
-def get_instance (str):
-    global offset,names, params, lines
-    index = get_instance_index(str);
-    return { "name" : names[index], "params" : params[index],  "line" : lines[index], "number" : str} 
 
 ### HEADER ###
 
@@ -77,6 +76,7 @@ def parse_stp_header_line(line):
         print ("header: ignoring " + data[0])
         
 def read_stp_header_line(f):
+    
     line = read_stp_line(f)
     parse_stp_header_line(line)
     return line
@@ -88,40 +88,27 @@ def read_stp_header(f):
 
 
 ### DATA READING ####
-        
-
 def parse_stp_data_line(line):
-    global offset,lines,params
     
-    pattern = r'(#[\d]*) = (\w[\w\d_]*)\((.*)\)$'
+    pattern = r'(#[\d]*)\s?=\s?(\w[\w\d_]*)\((.*)\)$'
     match = re.match(pattern, line)
     parsed = list(match.groups()) if match else []
     if (len(parsed)):
         #X = NAME(a,b,...);
-        if (offset < 0):
-            offset = get_instance_number(parsed[0])
-            
+        
         n_params = []
         parse_params(parsed[2],n_params)
-        
-        names.append(parsed[1])
-        params.append(n_params);
-        lines.append(line);
-        data.append("")
+        add_instance(line, name= parsed[1], params = n_params,data="", number=parsed[0])
     else:
-        pattern = r'(#[\d]*) = \((.*)\)$'
+        pattern = r'(#[\d]*)\s?=\s?\((.*)\)$'
         match = re.match(pattern, line)
         parsed = list(match.groups()) if match else []
         if (len(parsed)):
             ## Unknown at this moment
             #X = ( GEOMETRIC_REPRESENTATION_CONTEXT(2) PARAMETRIC_REPRESENTATION_CONTEXT() REPRESENTATION_CONTEXT('2D SPACE','') );
-            if (offset < 0):
-                offset = get_instance_number(parsed[0])
-            
-            names.append("")
-            params.append([]);
-            lines.append(line);
-            data.append("")
+            add_instance(line, name= "", params = [], data="", number=parsed[0])
+        else:
+            print ("Unknown match for: " + line);
         
         
 
@@ -131,12 +118,12 @@ def read_stp_data_line(f):
     return line
 
 def read_stp_data(f):
+    global instances
     line = ""
     while (line != "ENDSEC"):
         line = read_stp_data_line(f)    
         
-    print ("Readed " + str(len(names)) + " instances")       
-    
+    print ("Readed " + str(len(instances)) + " instances")   
 
 def parse_params(str, params):
     v =  ""
@@ -165,21 +152,35 @@ def parse_params(str, params):
 
 #X = ADVANCED_FACE('',(#18),#32,.F.);
 def get_advanced_face(instance):
-    global data
     if (instance["name"] != "ADVANCED_FACE"):
-        print ("ERROR: expected ADVANCED_FACE, found "+ instance["name"])
-        
-    index = get_instance_index(instance["number"])
+        print ("ERROR: expected ADVANCED_FACE, found "+ instance["name"] + instance["number"])
     
-    if(not data[index]):
-        data[index] = {
+    if(not instance["data"]):
+        
+        face_bounds = []
+        face_outer_bound = None
+        for number in instance["params"][1]:
+            child_instance = get_instance(number)
+            if child_instance["name"] == "FACE_BOUND":
+                
+                if (not face_outer_bound):
+                    face_outer_bound = get_face_bound (child_instance, "FACE_BOUND")
+                    
+                face_bounds.append (get_face_bound(child_instance))
+            elif child_instance["name"] == "FACE_OUTER_BOUND":
+                face_outer_bound = get_face_bound (child_instance, "FACE_OUTER_BOUND")
+            else:
+                print ("Ignored: " + child_instance["name"])
+            
+        instance["data"] = {
             "unknown1" : instance["params"][0],
-            "face_bound" : get_face_bound(get_instance(instance["params"][1][0])),
+            "face_bounds" : face_bounds,
+            "face_outer_bound": face_outer_bound ,
             "plane" : get_instance(instance["params"][2]),
             "unknown3" : instance["params"][3]
         }
         
-    return data[index]
+    return instance["data"]
 
 
 # Retuns verts of an edge loop
@@ -228,56 +229,47 @@ def get_edge_loop_verts(edge_loop):
 
     
 #X = FACE_BOUND('',#19,.F.);
-def get_face_bound(instance):
-    global data, faces
-    if (instance["name"] != "FACE_BOUND"):
-        print ("ERROR: expected FACE_BOUND, found "+ instance["name"])
+def get_face_bound(instance, name = "FACE_BOUND"):
+    if (instance["name"] != name):
+        print ("ERROR: expected " + name + ", found "+ instance["name"] + instance["number"])
         
-    index = get_instance_index(instance["number"])
-
-    if(not data[index]):
+    if(not instance["data"]):
         
         el = get_edge_loop(get_instance(instance["params"][1]))
         faces.append(get_edge_loop_verts(el))
         
-        data[index] = {
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "edge_loop" : el,
             "unknown2" : instance["params"][2]
         }
         
-    return data[index]
+    return instance["data"]
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
 def get_edge_loop(instance):
-    global data
     if (instance["name"] != "EDGE_LOOP"):
         print ("ERROR: expected EDGE_LOOP, found " + instance["name"])
-        
-    index = get_instance_index(instance["number"])
         
     oriented_edges = []
     for v in instance["params"][1]:
         oriented_edges.append(get_oriented_edge(get_instance(v)))
         
-    if(not data[index]):
-        data[index] = {
+    if(not instance["data"]):
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "oriented_edges" : oriented_edges
         }
     
-    return data[index]
+    return instance["data"]
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
 def get_oriented_edge(instance):
-    global data
     if (instance["name"] != "ORIENTED_EDGE"):
         print ("ERROR: expected ORIENTED_EDGE, found " + instance["name"])
-        
-    index = get_instance_index(instance["number"])
-        
-    if(not data[index]):
-        data[index] = {
+    
+    if(not instance["data"]):
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "unknown2" : instance["params"][1],
             "unknown3" : instance["params"][2],
@@ -285,23 +277,21 @@ def get_oriented_edge(instance):
             "unknown5" : instance["params"][4]
         }
         
-    return data[index]
+    return instance["data"]
     
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
 def get_edge_curve(instance):
-    global data, edges
+    global edges
     if (instance["name"] != "EDGE_CURVE"):
         print ("ERROR: expected EDGE_CURVE, found " + instance["name"])
         
-    index = get_instance_index(instance["number"])
-
-    if(not data[index]):
+    if(not instance["data"]):
         v1 = get_vertex_point(get_instance(instance["params"][1]))
         v2 = get_vertex_point(get_instance(instance["params"][2]))
         
         edges.append([v1["vertex_id"], v2["vertex_id"]])
         
-        data[index] = {
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "vertex_point_1" : v1,
             "vertex_point_2" : v2,
@@ -310,58 +300,51 @@ def get_edge_curve(instance):
             "edge_id" : len(edges)-1
         }
         
-    return data[index]
+    return instance["data"]
 
 #X = VERTEX_POINT('',#23);
 def get_vertex_point(instance):
-    global data,vertexs
+    global vertexs
     
     if (instance["name"] != "VERTEX_POINT"):
         print ("ERROR: expecte VERTEX_POINT, found " + instance["name"])
-        
-    index = get_instance_index(instance["number"])
-            
-    if(not data[index]):
+                    
+    if(not instance["data"]):
         cartesian_point = get_cartesian_point(get_instance(instance["params"][1]))
 
         vertexs.append ([cartesian_point["x"], cartesian_point["y"], cartesian_point["z"]])
         
-        data[index] = {
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "cartesian_point" : cartesian_point,
             "vertex_id" : len(vertexs)-1
         }
     
-    return data[index];
+    return instance["data"];
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
 def get_cartesian_point(instance):
     if (instance["name"] != "CARTESIAN_POINT"):
         print ("ERROR: expected CARTESIAN_POINT, found " + instance["name"])
         
-    index = get_instance_index(instance["number"])
-        
-    if(not data[index]):
-        data[index] = {
+    if(not instance["data"]):
+        instance["data"] = {
             "unknown1" : instance["params"][0],
             "x" : float(instance["params"][1][0]),
             "y" : float(instance["params"][1][1]),
             "z" : float(instance["params"][1][2])
         }
       
-    return data[index]
+    return instance["data"]
   
 ### DATA PROCESSING ###
    
 def process_stp_data_advanced_face (instance):
-    print ("Importing face " + instance["number"])
+    print ("Importing ADVANCED_FACE" + instance["number"])
     face = get_advanced_face(instance)
           
 def process_stp_data():
-    global names
-    
-    for index,instance in enumerate(names):
-        instance = get_instance(get_instance_id (index));
+    for instance in instances:
         if (instance["name"] == "ADVANCED_FACE"):
             process_stp_data_advanced_face(instance)
             
@@ -373,9 +356,9 @@ def process_stp_data():
 def import_stp_data ():
     global vertexs, edges, faces
     
-    print (vertexs)
-    print (edges)
-    print (faces)
+    #print (vertexs)
+    #print (edges)
+    #print (faces)
 
     
     me = bpy.data.meshes.new("TEST")    
@@ -394,20 +377,14 @@ def import_stp_data ():
 ### MAIN FUNC ####
 
 def read_stp(filepath): 
-    global offset, names,lines, params
     
-    offset = -1
-    names = []
-    lines = []
-    params = []
-    
-    
+    instances=[]
+   
     f = open(filepath, 'rb')
     line = read_stp_line(f)
     if (line == "ISO-10303-21"):
         print ("Reading ISO-10303-21 file")
     else:
-        print (line)
         print ("Not recognized " + line + "- abort")
         return
 
@@ -425,6 +402,8 @@ def read_stp(filepath):
     
     process_stp_data()
     import_stp_data()
+    
+    print ("Done!")
 
 if __name__ == '__main__':
     import sys
@@ -435,4 +414,5 @@ if __name__ == '__main__':
     #for filepath in filepaths:
     #    read_stp(filepath)
         
-    read_stp("/home/jaume/downloads/SIEM-CONJ-L00025.stp")
+    #read_stp("/home/jaume/tmp/cube.stp")
+    read_stp("/home/jaume/Downloads/SIEM-CONJ-L00025.stp")
