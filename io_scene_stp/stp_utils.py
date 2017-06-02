@@ -64,7 +64,11 @@ def get_instance(number):
         print ("Error: Expected " + number + ", found " + instance["number"])
     
     return instance
-
+    
+def check_instance_name (instance, name):
+     if (instance["name"] != name):
+        print ("ERROR: expected " + name + ", found "+ instance["name"] + instance["number"])
+   
 
 ### HEADER ###
 
@@ -152,11 +156,9 @@ def parse_params(str, params):
 
 #X = ADVANCED_FACE('',(#18),#32,.F.);
 def get_advanced_face(instance):
-    if (instance["name"] != "ADVANCED_FACE"):
-        print ("ERROR: expected ADVANCED_FACE, found "+ instance["name"] + instance["number"])
+    check_instance_name(instance, "ADVANCED_FACE")
     
     if(not instance["data"]):
-        
         face_bounds = []
         face_outer_bound = None
         for number in instance["params"][1]:
@@ -230,11 +232,9 @@ def get_edge_loop_verts(edge_loop):
     
 #X = FACE_BOUND('',#19,.F.);
 def get_face_bound(instance, name = "FACE_BOUND"):
-    if (instance["name"] != name):
-        print ("ERROR: expected " + name + ", found "+ instance["name"] + instance["number"])
+    check_instance_name (instance, name)
         
     if(not instance["data"]):
-        
         el = get_edge_loop(get_instance(instance["params"][1]))
         faces.append(get_edge_loop_verts(el))
         
@@ -248,8 +248,7 @@ def get_face_bound(instance, name = "FACE_BOUND"):
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
 def get_edge_loop(instance):
-    if (instance["name"] != "EDGE_LOOP"):
-        print ("ERROR: expected EDGE_LOOP, found " + instance["name"])
+    check_instance_name(instance, "EDGE_LOOP")
         
     oriented_edges = []
     for v in instance["params"][1]:
@@ -265,8 +264,7 @@ def get_edge_loop(instance):
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
 def get_oriented_edge(instance):
-    if (instance["name"] != "ORIENTED_EDGE"):
-        print ("ERROR: expected ORIENTED_EDGE, found " + instance["name"])
+    check_instance_name(instance, "ORIENTED_EDGE")
     
     if(not instance["data"]):
         instance["data"] = {
@@ -282,8 +280,7 @@ def get_oriented_edge(instance):
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
 def get_edge_curve(instance):
     global edges
-    if (instance["name"] != "EDGE_CURVE"):
-        print ("ERROR: expected EDGE_CURVE, found " + instance["name"])
+    check_instance_name(instance, "EDGE_CURVE")
         
     if(not instance["data"]):
         v1 = get_vertex_point(get_instance(instance["params"][1]))
@@ -305,9 +302,7 @@ def get_edge_curve(instance):
 #X = VERTEX_POINT('',#23);
 def get_vertex_point(instance):
     global vertexs
-    
-    if (instance["name"] != "VERTEX_POINT"):
-        print ("ERROR: expecte VERTEX_POINT, found " + instance["name"])
+    check_instance_name(instance, "VERTEX_POINT")
                     
     if(not instance["data"]):
         cartesian_point = get_cartesian_point(get_instance(instance["params"][1]))
@@ -324,10 +319,9 @@ def get_vertex_point(instance):
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
 def get_cartesian_point(instance):
-    if (instance["name"] != "CARTESIAN_POINT"):
-        print ("ERROR: expected CARTESIAN_POINT, found " + instance["name"])
+    check_instance_name(instance, "CARTESIAN_POINT")
         
-    if(not instance["data"]):
+    if not instance["data"]:
         instance["data"] = {
             "unknown1" : instance["params"][0],
             "x" : float(instance["params"][1][0]),
@@ -336,20 +330,142 @@ def get_cartesian_point(instance):
         }
       
     return instance["data"]
+
+#X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
+def get_application_context(instance):
+    check_instance_name(instance,"APPLICATION_CONTEXT")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            "desctiption": instance["params"][0]
+        }
+    return instance["data"]
+
+#X = MECHANICAL_CONTEXT('',#2,'mechanical');
+def get_mechanical_context(instance):
+    check_instance_name(instance, "MECHANICAL_CONTEXT")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            "unknown" : instance["params"][0],
+            "applicacion_context" : get_application_context(get_instance(instance["params"][1])),
+            "name" : instance["params"][2]
+        }
+        
+    return instance["data"]
+
+#X = PRODUCT('Cube','Cube','',(#8));
+def get_product(instance):
+    check_instance_name(instance, "PRODUCT")
+    
+    if not instance["data"]:
+        contexts = []
+        for number in instance["params"][3]:
+            instance_context = get_instance(number)
+            if instance_context["name"] == "MECHANICAL_CONTEXT":
+                contexts.apppend(get_mechanical_contexts(instance_context))
+            else:
+                print ("unkown context")        
+
+        instance["data"] = {
+            "name" : instance["params"][0],
+            "name2" : instance["params"][1],
+            "unknown1" : instance["params"][2],
+            "contexts" : contexts
+        }
+    
+    return instance["data"]
+
+#X = PRODUCT_TYPE('part',$,(#7));
+def get_product_type(instance):
+    check_instance_name(instance, "PRODUCT_TYPE")
+    products = []
+    
+    for product in instance["params"][2]:
+        products.append(get_product(get_instance(product)))
+    
+    if(not instance["data"]):
+        instance["data"] = {
+            "type" : instance["params"][0],
+            "unknown1" : instance["params"][1],
+            "products" : products,   
+        }  
+        
+    return instance["data"]
+
+
+
+
+#X = PRODUCT_DEFINITION_FORMATION('','',#7);
+def get_product_definition_formation(instance):
+    check_instance_name("PRODUCT_DEFINITION_FORMATION")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            "unknown1" : instance["params"][0],
+            "unknown2" : instance["params"][1],
+            "product" : get_product(get_instance(instance["params"][2]))
+        }
+
+#X = PRODUCT_DEFINITION('design','',#6,#9);
+def get_product_definition(instance):
+    check_instance_name(instance, "PRODUCT_DEFINITION")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            "type" : instance["params"][0],
+            "unknown1" : instance["params"][1],
+            "product_defintion_formation" : get_product_definition_formation(get_instance(instance["params"][2])),
+            "product_definition_context" : get_product_definition_context(get_instance(instance["params"][2])) 
+        }
+        
+    return instance["data"]
+
+
+#X = PRODUCT_DEFINITION_SHAPE('','',#5);
+def get_product_definition_shape(instance):
+    check_instance_name(instance, "PRODUCT_DEFINITION_SHAPE")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            "unknown1" : instance["params"][0],
+            "unknown2" : instance["params"][1],
+            "product_definition": get_product_definition(get_instance(instance["params"][2]))
+        }
+        
+    return instance["data"]
+
+#X = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#345);
+def get_advanced_brep_shape_representation(instance):
+    check_instance_name(instance, "ADVANCED_BREP_SHAPE_REPRESENTATION")
+    
+    if not instance["data"]:
+        instance["data"] = {
+            
+        }
+        
+    return instance["data"]
+
+
+#X = SHAPE_DEFINITION_REPRESENTATION(#4,#10);
+def get_shape_definition_representation(instance):
+    check_instance_name(instance, "SHAPE_DEFINITION_REPRESENTATION")
+    
+    if (not instance["data"]):
+        instance["data"] = {
+            "product_defintion_shape" : get_product_definition_shape(get_instance(instance["params"][0])),
+            "advanced_brep_shape_representation" : get_advanced_brep_shape_representation(get_instance(instance["params"][1]))
+        }            
+    
+    return instance["data"]
   
 ### DATA PROCESSING ###
-   
-def process_stp_data_advanced_face (instance):
-    print ("Importing ADVANCED_FACE" + instance["number"])
-    face = get_advanced_face(instance)
           
 def process_stp_data():
     for instance in instances:
-        if (instance["name"] == "ADVANCED_FACE"):
-            process_stp_data_advanced_face(instance)
+        if (instance["name"] == "SHAPE_DEFINITION_REPRESENTATION"):
+            get_shape_definition_representation(instance) 
             
-    
-
 
 ### IMPORT TO BLENDER FUNC
 
@@ -413,6 +529,10 @@ if __name__ == '__main__':
     
     #for filepath in filepaths:
     #    read_stp(filepath)
+    
+    test_folder = "/home/jaume/src/mechanical-blender-addons/io_scene_stp/test_files/"
         
-    #read_stp("/home/jaume/tmp/cube.stp")
-    read_stp("/home/jaume/Downloads/SIEM-CONJ-L00025.stp")
+    read_stp(test_folder + "cube.stp")
+    #read_stp(test_folder + "SIEM-CONJ-L00025.stp")
+    
+    
