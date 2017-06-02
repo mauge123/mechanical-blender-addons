@@ -29,6 +29,12 @@ blender --python stp_utils.py -- file1.stl file2.stl file3.stl ...
 import re
 import bpy
 
+import pprint
+pp = pprint.PrettyPrinter(indent=4)
+
+structure = {}
+structure_func = {}
+
 instances = []
 data = []   # Instance blender data
 
@@ -69,6 +75,60 @@ def check_instance_name (instance, name):
      if (instance["name"] != name):
         print ("ERROR: expected " + name + ", found "+ instance["name"] + instance["number"])
    
+def load_instance(instance):
+    if instance["name"] in structure:
+        if not instance["data"]:
+            instance["data"] = {}
+            if not (len(structure[instance["name"]]) == len(instance["params"])):
+                print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"])
+            for idx,n  in enumerate(structure[instance["name"]]):
+                if n:
+                    param = instance["params"][idx]
+                    if isinstance(param, list):
+                        instance["data"][n] = []
+                        for a in instance["params"][idx]:
+                            if a[0] == '#':
+                                instance["data"][n].append(load_instance(get_instance(a)))
+                            else:
+                                instance["data"][n].append(a)
+                    elif param[0] == '#':
+                        instance["data"][n] = load_instance(get_instance(param))
+                    else:
+                        instance["data"][n] = param
+            if instance["name"] in structure_func:
+                structure_func[instance["name"]](instance)
+    else:
+        print ("Not defined instance " + instance["number"] + " " +instance["name"])
+
+    return instance
+
+def get_instance_value(instance,path, index=0):
+    value = instance["data"][path[index]]
+    if index+1 < len(path):
+        value = get_instance_value(value,path, index+1)
+    return value
+
+def print_instance(instance, max_levels=-1, name = "", level =0):
+    if max_levels > -1 and level > max_levels:
+        return
+    
+    spaces=""
+    for i in range(level):
+        spaces=spaces+"|"
+    print (spaces + name + instance["number"] + " " + instance["name"])
+    spaces=spaces+"|"
+    for name in instance["data"]:
+        value = instance["data"][name]
+        if isinstance(value, str):
+            print (spaces + name + ":" + value) 
+        elif isinstance(value,list):
+            for idx,value2 in enumerate(value):
+                if isinstance(value2, str):
+                    print (spaces+name+"["+str(idx)+"]:"+value2)
+                else:
+                    print_instance(value2, max_levels, name + "["+str(idx)+"]:", level+1)
+        else:
+            print_instance(value, max_levels, name + ":", level+1)
 
 ### HEADER ###
 
@@ -151,49 +211,18 @@ def parse_params(str, params):
         params.append(v)
     
     return i+1;
-
-### INSTANCE STRUCTURES ####
-
-#X = ADVANCED_FACE('',(#18),#32,.F.);
-def get_advanced_face(instance):
-    check_instance_name(instance, "ADVANCED_FACE")
     
-    if(not instance["data"]):
-        face_bounds = []
-        face_outer_bound = None
-        for number in instance["params"][1]:
-            child_instance = get_instance(number)
-            if child_instance["name"] == "FACE_BOUND":
-                
-                if (not face_outer_bound):
-                    face_outer_bound = get_face_bound (child_instance, "FACE_BOUND")
-                    
-                face_bounds.append (get_face_bound(child_instance))
-            elif child_instance["name"] == "FACE_OUTER_BOUND":
-                face_outer_bound = get_face_bound (child_instance, "FACE_OUTER_BOUND")
-            else:
-                print ("Ignored: " + child_instance["name"])
-            
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "face_bounds" : face_bounds,
-            "face_outer_bound": face_outer_bound ,
-            "plane" : get_instance(instance["params"][2]),
-            "unknown3" : instance["params"][3]
-        }
-        
-    return instance["data"]
-
+### INSTANCE UTILS ###
 
 # Retuns verts of an edge loop
 def get_edge_loop_verts(edge_loop):
     edges = []
     verts = []
-
-    for ed in edge_loop["oriented_edges"]:
+    
+    for ed in get_instance_value(edge_loop,["oriented_edges"]):
         edges.append([
-            ed["edge_curve"]["vertex_point_1"]["vertex_id"],
-            ed["edge_curve"]["vertex_point_2"]["vertex_id"]
+            get_instance_value(ed, ["edge_curve","vertex_point_1","vertex_id"]),
+            get_instance_value(ed, ["edge_curve","vertex_point_2","vertex_id"])
         ])
                 
     ordered_edges = []
@@ -229,242 +258,140 @@ def get_edge_loop_verts(edge_loop):
 
     return verts
 
+
+
+### INSTANCE STRUCTURES ####
+
+#X= PLANE('',#33);
+structure["PLANE"] = ["unknown", "axis2_placement_3d"]
+
+#X = ADVANCED_FACE('',(#18),#32,.F.);
+structure["ADVANCED_FACE"] = ["unknown","data","plane", "unknown2"]
     
 #X = FACE_BOUND('',#19,.F.);
-def get_face_bound(instance, name = "FACE_BOUND"):
-    check_instance_name (instance, name)
-        
-    if(not instance["data"]):
-        el = get_edge_loop(get_instance(instance["params"][1]))
-        faces.append(get_edge_loop_verts(el))
-        
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "edge_loop" : el,
-            "unknown2" : instance["params"][2]
-        }
-        
-    return instance["data"]
+structure["FACE_BOUND"] = ["unknown1", "edge_loop", "unknown2"]
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
-def get_edge_loop(instance):
-    check_instance_name(instance, "EDGE_LOOP")
-        
-    oriented_edges = []
-    for v in instance["params"][1]:
-        oriented_edges.append(get_oriented_edge(get_instance(v)))
-        
-    if(not instance["data"]):
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "oriented_edges" : oriented_edges
-        }
-    
-    return instance["data"]
+structure["EDGE_LOOP"] = ["unknown1", "oriented_edges"]
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
-def get_oriented_edge(instance):
-    check_instance_name(instance, "ORIENTED_EDGE")
-    
-    if(not instance["data"]):
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "unknown2" : instance["params"][1],
-            "unknown3" : instance["params"][2],
-            "edge_curve" : get_edge_curve(get_instance(instance["params"][3])),
-            "unknown5" : instance["params"][4]
-        }
-        
-    return instance["data"]
+structure["ORIENTED_EDGE"] = ["unknown1", "unknown2", "unknown3", "edge_curve", "unknown5"]
     
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
-def get_edge_curve(instance):
+def set_edge_index(instance):
     global edges
-    check_instance_name(instance, "EDGE_CURVE")
+    v1 = get_instance_value(instance, ["vertex_point_1","vertex_id"])
+    v2 = get_instance_value(instance, ["vertex_point_2", "vertex_id"])
+    edges.append([v1,v2])
+    instance["data"]["edge_id"] = len(edges) -1
         
-    if(not instance["data"]):
-        v1 = get_vertex_point(get_instance(instance["params"][1]))
-        v2 = get_vertex_point(get_instance(instance["params"][2]))
-        
-        edges.append([v1["vertex_id"], v2["vertex_id"]])
-        
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "vertex_point_1" : v1,
-            "vertex_point_2" : v2,
-            "surface_curve" : get_instance(instance["params"][3]),
-            "unknown5" : instance["params"][4],
-            "edge_id" : len(edges)-1
-        }
-        
-    return instance["data"]
+structure["EDGE_CURVE"] = ["unknown1", "vertex_point_1", "vertex_point_2", "surface_curve", "unknown5"]
+structure_func["EDGE_CURVE"] = set_edge_index
+
+#X = SURFACE_CURVE('',#27,(#31,#43),.PCURVE_S1.)
+structure["SURFACE_CURVE"] = ["unknown", "line", "data", "unknown2"]
+
+#X = PCURVE('',#32,#37);
+structure["PCURVE"] = ["unknown","plane","definitional_representation"]
+
+#X = DEFINITIONAL_REPRESENTATION('',(#38),#42);
+structure["DEFINITIONAL_REPRESENTATION"] = ["unkown", "data", None]
+
+#X = LINE('',#28,#29);
+structure["LINE"] = ["unknown1", "cartesian_point", "vector"]
+
+#X = VECTOR('',#30,1.);
+structure["VECTOR"] = ["unknown1", "direction", "value"]
 
 #X = VERTEX_POINT('',#23);
-def get_vertex_point(instance):
+def set_vertex_index (instance):
     global vertexs
-    check_instance_name(instance, "VERTEX_POINT")
-                    
-    if(not instance["data"]):
-        cartesian_point = get_cartesian_point(get_instance(instance["params"][1]))
+    co = get_instance_value(instance, ["cartesian_point","coordinates"])
+    vertexs.append ([float(co[0]), float(co[1]), float(co[2])])
+    instance["data"]["vertex_id"] = len(vertexs)-1
 
-        vertexs.append ([cartesian_point["x"], cartesian_point["y"], cartesian_point["z"]])
-        
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "cartesian_point" : cartesian_point,
-            "vertex_id" : len(vertexs)-1
-        }
-    
-    return instance["data"];
+structure["VERTEX_POINT"] = ["unknown1","cartesian_point"]
+structure_func["VERTEX_POINT"] = set_vertex_index
+
+#X = CLOSED_SHELL('',(#17,#137,#237,#284,#331,#338));
+structure["CLOSED_SHELL"] = ["unknown", "data"]
+
+#X = MANIFOLD_SOLID_BREP('',#16);
+structure["MANIFOLD_SOLID_BREP"] = ["unknown", "closed_shell"]
+
+#X = DIRECTION('',(1.,0.,-0.));
+structure["DIRECTION"] = ["unknown", "values"]
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
-def get_cartesian_point(instance):
-    check_instance_name(instance, "CARTESIAN_POINT")
-        
-    if not instance["data"]:
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "x" : float(instance["params"][1][0]),
-            "y" : float(instance["params"][1][1]),
-            "z" : float(instance["params"][1][2])
-        }
-      
-    return instance["data"]
+structure["CARTESIAN_POINT"] = ["unknown", "coordinates"]
+
+#X = AXIS2_PLACEMENT_3D('',#12,#13,#14);
+structure["AXIS2_PLACEMENT_3D"] = ["name", "cartesian_point", "direction1", "direction2"]
 
 #X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
-def get_application_context(instance):
-    check_instance_name(instance,"APPLICATION_CONTEXT")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            "desctiption": instance["params"][0]
-        }
-    return instance["data"]
+structure["APPLICATION_CONTEXT"] = ["description"]
 
 #X = MECHANICAL_CONTEXT('',#2,'mechanical');
-def get_mechanical_context(instance):
-    check_instance_name(instance, "MECHANICAL_CONTEXT")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            "unknown" : instance["params"][0],
-            "applicacion_context" : get_application_context(get_instance(instance["params"][1])),
-            "name" : instance["params"][2]
-        }
-        
-    return instance["data"]
+structure["MECHANICAL_CONTEXT"] =  ["unknown", "application_context", "name"]
 
 #X = PRODUCT('Cube','Cube','',(#8));
-def get_product(instance):
-    check_instance_name(instance, "PRODUCT")
-    
-    if not instance["data"]:
-        contexts = []
-        for number in instance["params"][3]:
-            instance_context = get_instance(number)
-            if instance_context["name"] == "MECHANICAL_CONTEXT":
-                contexts.apppend(get_mechanical_contexts(instance_context))
-            else:
-                print ("unkown context")        
-
-        instance["data"] = {
-            "name" : instance["params"][0],
-            "name2" : instance["params"][1],
-            "unknown1" : instance["params"][2],
-            "contexts" : contexts
-        }
-    
-    return instance["data"]
+structure["PRODUCT"] = ["name", "description", "unknown1", "contexts"]
 
 #X = PRODUCT_TYPE('part',$,(#7));
-def get_product_type(instance):
-    check_instance_name(instance, "PRODUCT_TYPE")
-    products = []
-    
-    for product in instance["params"][2]:
-        products.append(get_product(get_instance(product)))
-    
-    if(not instance["data"]):
-        instance["data"] = {
-            "type" : instance["params"][0],
-            "unknown1" : instance["params"][1],
-            "products" : products,   
-        }  
-        
-    return instance["data"]
-
-
-
+structure["PRODCUT_TYPE"] = ["type", "unknwown1", "products"]
 
 #X = PRODUCT_DEFINITION_FORMATION('','',#7);
-def get_product_definition_formation(instance):
-    check_instance_name("PRODUCT_DEFINITION_FORMATION")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "unknown2" : instance["params"][1],
-            "product" : get_product(get_instance(instance["params"][2]))
-        }
+structure["PRODUCT_DEFINITION_FORMATION"] = ["unknown1", "unknown2", "product"]
+
+#X = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design')
+structure["PRODUCT_DEFINITION_CONTEXT"] = ["name", "application_context", "type"]
 
 #X = PRODUCT_DEFINITION('design','',#6,#9);
-def get_product_definition(instance):
-    check_instance_name(instance, "PRODUCT_DEFINITION")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            "type" : instance["params"][0],
-            "unknown1" : instance["params"][1],
-            "product_defintion_formation" : get_product_definition_formation(get_instance(instance["params"][2])),
-            "product_definition_context" : get_product_definition_context(get_instance(instance["params"][2])) 
-        }
-        
-    return instance["data"]
-
+structure["PRODUCT_DEFINITION"] = ["type", "unknown1", "product_definition_formation", "product_definition_context"]
 
 #X = PRODUCT_DEFINITION_SHAPE('','',#5);
-def get_product_definition_shape(instance):
-    check_instance_name(instance, "PRODUCT_DEFINITION_SHAPE")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            "unknown1" : instance["params"][0],
-            "unknown2" : instance["params"][1],
-            "product_definition": get_product_definition(get_instance(instance["params"][2]))
-        }
-        
-    return instance["data"]
+structure["PRODUCT_DEFINITION_SHAPE"] = ["unknown1", "unknown2", "product_definition"]
 
 #X = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#345);
-def get_advanced_brep_shape_representation(instance):
-    check_instance_name(instance, "ADVANCED_BREP_SHAPE_REPRESENTATION")
-    
-    if not instance["data"]:
-        instance["data"] = {
-            
-        }
-        
-    return instance["data"]
-
+structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = ["unknown1","data", None]
 
 #X = SHAPE_DEFINITION_REPRESENTATION(#4,#10);
-def get_shape_definition_representation(instance):
-    check_instance_name(instance, "SHAPE_DEFINITION_REPRESENTATION")
-    
-    if (not instance["data"]):
-        instance["data"] = {
-            "product_defintion_shape" : get_product_definition_shape(get_instance(instance["params"][0])),
-            "advanced_brep_shape_representation" : get_advanced_brep_shape_representation(get_instance(instance["params"][1]))
-        }            
-    
-    return instance["data"]
+structure["SHAPE_DEFINITION_REPRESENTATION"] = ["product_definition_shape", "advanced_brep_shape_representation"]
+
   
 ### DATA PROCESSING ###
           
 def process_stp_data():
     for instance in instances:
         if (instance["name"] == "SHAPE_DEFINITION_REPRESENTATION"):
-            get_shape_definition_representation(instance) 
+            #get_shape_definition_representation(instance) 
+            load_instance(instance)
+            #print_instance(instance)
+            
+            for child in get_instance_value(instance, ["advanced_brep_shape_representation","data"]):
+                if child["name"] == "AXIS2_PLACEMENT_3D":
+                    None
+                    #something
+                elif child["name"] == "MANIFOLD_SOLID_BREP":
+                    for face in get_instance_value(child, ["closed_shell", "data"]):
+                        if (face["name"] == "ADVANCED_FACE"):
+                            for fb in get_instance_value(face,["data"]):
+                                if (fb["name"] == "FACE_BOUND"):
+                                    faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
+                                else:
+                                    print ("Unknon instance")
+                        else:
+                            print ("Unknown instance")
+                else:
+                    print ("Unkown Instance")            
+                            
+            shape_name = get_instance_value(instance, [
+                "product_definition_shape",
+                "product_definition",
+                "product_definition_formation",
+                "product",
+                "name"
+                ])
             
 
 ### IMPORT TO BLENDER FUNC
@@ -472,9 +399,9 @@ def process_stp_data():
 def import_stp_data ():
     global vertexs, edges, faces
     
-    #print (vertexs)
-    #print (edges)
-    #print (faces)
+    print (vertexs)
+    print (edges)
+    print (faces)
 
     
     me = bpy.data.meshes.new("TEST")    
