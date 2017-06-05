@@ -97,6 +97,8 @@ def load_instance(instance, parent = None):
                                 new_instance = load_instance(get_instance(a),instance)
                                 if len(n_exp) and not new_instance["name"] in n_exp:
                                     print ("Error: not expected " + new_instance["name"] + " in " +  instance["number"] + " " + instance ["name"])
+                                elif not len(n_exp):
+                                    print ("loading object " + new_instance["name"] +" with no instance name defined in " + instance["number"] + " " + instance["name"])
                                 instance["data"][n].append(new_instance)
                             else:
                                 if len(n_exp):
@@ -106,6 +108,8 @@ def load_instance(instance, parent = None):
                         new_instance = load_instance(get_instance(param), instance)
                         if len(n_exp) and not new_instance["name"] in n_exp:
                             print ("Error: not expected " + new_instance["name"] + "in " + instance["number"] + " " + instance["name"])
+                        elif not len(n_exp):
+                            print ("loading object " + new_instance["name"] + " with no instance name defined in " + instance["number"] + " " + instance["name"])
                         instance["data"][n] = new_instance
                     else:
                         if len(n_exp):
@@ -242,8 +246,8 @@ def get_edge_loop_verts(edge_loop):
     
     for ed in get_instance_value(edge_loop,["oriented_edges"]):
         edges.append([
-            get_instance_value(ed, ["edge_curve","vertex_point_1","vertex_id"]),
-            get_instance_value(ed, ["edge_curve","vertex_point_2","vertex_id"])
+            get_instance_value(ed, ["edge_curve","v1","vertex_id"]),
+            get_instance_value(ed, ["edge_curve","v2","vertex_id"])
         ])
                 
     ordered_edges = []
@@ -284,45 +288,45 @@ def get_edge_loop_verts(edge_loop):
 ### INSTANCE STRUCTURES ####
 
 #X= PLANE('',#33);
-structure["PLANE"] = ["unknown", "axis2_placement_3d"]
+structure["PLANE"] = ["unknown", "AXIS2_PLACEMENT_3D|axis2_placement_3d"]
 
 #X = ADVANCED_FACE('',(#18),#32,.F.);
-structure["ADVANCED_FACE"] = ["unknown","data","plane", "unknown2"]
+structure["ADVANCED_FACE"] = ["unknown","FACE_BOUND|data","PLANE|plane", "unknown2"]
     
 #X = FACE_BOUND('',#19,.F.);
-structure["FACE_BOUND"] = ["unknown1", "edge_loop", "unknown2"]
+structure["FACE_BOUND"] = ["unknown1", "EDGE_LOOP|edge_loop", "unknown2"]
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
-structure["EDGE_LOOP"] = ["unknown1", "oriented_edges"]
+structure["EDGE_LOOP"] = ["unknown1", "ORIENTED_EDGE|oriented_edges"]
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
-structure["ORIENTED_EDGE"] = ["unknown1", "unknown2", "unknown3", "edge_curve", "unknown5"]
+structure["ORIENTED_EDGE"] = ["unknown1", "unknown2", "unknown3", "EDGE_CURVE|edge_curve", "unknown5"]
     
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
 def set_edge_index(instance):
     global edges
-    v1 = get_instance_value(instance, ["vertex_point_1","vertex_id"])
-    v2 = get_instance_value(instance, ["vertex_point_2", "vertex_id"])
+    v1 = get_instance_value(instance, ["v1","vertex_id"])
+    v2 = get_instance_value(instance, ["v2", "vertex_id"])
     edges.append([v1,v2])
     instance["data"]["edge_id"] = len(edges) -1
         
-structure["EDGE_CURVE"] = ["unknown1", "vertex_point_1", "vertex_point_2", "surface_curve", "unknown5"]
+structure["EDGE_CURVE"] = ["unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|surface_curve", "unknown5"]
 structure_func["EDGE_CURVE"] = set_edge_index
 
 #X = SURFACE_CURVE('',#27,(#31,#43),.PCURVE_S1.)
-structure["SURFACE_CURVE"] = ["unknown", "line", "data", "unknown2"]
+structure["SURFACE_CURVE"] = ["unknown", "LINE|line", "PCURVE|data", "unknown2"]
 
 #X = PCURVE('',#32,#37);
-structure["PCURVE"] = ["unknown","plane","definitional_representation"]
+structure["PCURVE"] = ["unknown","PLANE|plane","DEFINITIONAL_REPRESENTATION|def_representation"]
 
 #X = DEFINITIONAL_REPRESENTATION('',(#38),#42);
-structure["DEFINITIONAL_REPRESENTATION"] = ["unkown", "data", None]
+structure["DEFINITIONAL_REPRESENTATION"] = ["unkown", "LINE|data", None]
 
 #X = LINE('',#28,#29);
-structure["LINE"] = ["unknown1", "cartesian_point", "vector"]
+structure["LINE"] = ["unknown1", "CARTESIAN_POINT|cartesian_point", "VECTOR|vector"]
 
 #X = VECTOR('',#30,1.);
-structure["VECTOR"] = ["unknown1", "direction", "value"]
+structure["VECTOR"] = ["unknown1", "DIRECTION|direction", "value"]
 
 #X = VERTEX_POINT('',#23);
 def set_vertex_index (instance):
@@ -331,11 +335,11 @@ def set_vertex_index (instance):
     vertexs.append ([float(co[0]), float(co[1]), float(co[2])])
     instance["data"]["vertex_id"] = len(vertexs)-1
 
-structure["VERTEX_POINT"] = ["unknown1","cartesian_point"]
+structure["VERTEX_POINT"] = ["unknown1","CARTESIAN_POINT|cartesian_point"]
 structure_func["VERTEX_POINT"] = set_vertex_index
 
 #X = CLOSED_SHELL('',(#17,#137,#237,#284,#331,#338));
-structure["CLOSED_SHELL"] = ["unknown", "data"]
+structure["CLOSED_SHELL"] = ["unknown", "ADVANCED_FACE|data"]
 
 #X = MANIFOLD_SOLID_BREP('',#16);
 def set_faces (instance):
@@ -351,7 +355,7 @@ def set_faces (instance):
             
     
             
-structure["MANIFOLD_SOLID_BREP"] = ["unknown", "closed_shell"]
+structure["MANIFOLD_SOLID_BREP"] = ["unknown", "CLOSED_SHELL|closed_shell"]
 structure_func["MANIFOLD_SOLID_BREP"] = set_faces
 
 #X = DIRECTION('',(1.,0.,-0.));
@@ -361,13 +365,13 @@ structure["DIRECTION"] = ["unknown", "values"]
 structure["CARTESIAN_POINT"] = ["unknown", "coordinates"]
 
 #X = AXIS2_PLACEMENT_3D('',#12,#13,#14);
-structure["AXIS2_PLACEMENT_3D"] = ["name", "cartesian_point", "direction1", "direction2"]
+structure["AXIS2_PLACEMENT_3D"] = ["name", "CARTESIAN_POINT|point", "DIRECTION|dir1", "DIRECTION|dir2"]
 
 #X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
 structure["APPLICATION_CONTEXT"] = ["description"]
 
 #X = MECHANICAL_CONTEXT('',#2,'mechanical');
-structure["MECHANICAL_CONTEXT"] =  ["unknown", "application_context", "name"]
+structure["MECHANICAL_CONTEXT"] =  ["unknown", "APPLICATION_CONTEXT|application_context", "name"]
 
 #X = PRODUCT_CONTEXT('',#5,'mechanical');
 structure["PRODUCT_CONTEXT"] = ["unknown", "application_context", "name"]
@@ -464,7 +468,11 @@ def process_stp_data():
             
             if not object_name:
                 object_name = "Unknown Object"
+                
+            print ("Importing " + object_name)
             
+            continue
+        
             me = bpy.data.meshes.new(object_name)    
             ob = bpy.data.objects.new(object_name, me)
             scn = bpy.context.scene
@@ -476,6 +484,8 @@ def process_stp_data():
 
             me.validate()    
             me.update()
+            
+
         
         if (False and instance["name"] == "SHAPE_DEFINITION_REPRESENTATION"):
             #object is loaded previosly
