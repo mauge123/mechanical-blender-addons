@@ -34,6 +34,7 @@ pp = pprint.PrettyPrinter(indent=4)
 
 structure = {}
 structure_func = {}
+structure_params = {}
 
 instances = []
 data = []   # Instance blender data
@@ -42,6 +43,8 @@ object_name = ""
 vertexs = [] # Mesh Vertices
 edges = [] # Mesh Edges
 faces = [] # Mesh Faces
+
+print_verbose_level = 0
 
 ### COMMON FUNCTION ###
 
@@ -108,6 +111,11 @@ def load_instance(instance, parent = None):
                                 if len(n_exp):
                                     if "func" in n_exp:
                                         None
+                                    elif "str" in n_exp:
+                                        if a[0] == "'" and a[-1] == "'":
+                                            a = a[1:-1]
+                                        else:
+                                            print ("Expected 'string'")
                                     else:
                                         print ("Error: Expected instance")
                                         
@@ -123,6 +131,11 @@ def load_instance(instance, parent = None):
                         if len(n_exp):
                             if "func" in n_exp:
                                 None
+                            elif "str" in n_exp:
+                                if param[0] == "'" and param[-1] == "'":
+                                    param = param[1:-1]
+                                else:
+                                    print ("Expected 'string'")
                             else:
                                 print ("Error: Expected instance")
                         
@@ -157,6 +170,8 @@ def get_instance_value(instance,path, index=0):
     return value
 
 def print_instance(instance, max_levels=-1, name = "", level =0):
+    global print_verbose_level
+    
     if max_levels > -1 and level > max_levels:
         return
     
@@ -164,15 +179,25 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
     for i in range(level):
         spaces=spaces+"|"
     print (spaces + name + instance["number"] + " " + instance["name"])
+    
+    if instance["name"] in structure_params and "print_verbose" in structure_params[instance["name"]]:
+        pv = structure_params[instance["name"]]["print_verbose"]
+        if pv > print_verbose_level: 
+            return
+    
     spaces=spaces+"|"
     for name in instance["data"]:
         value = instance["data"][name]
         if isinstance(value, str):
             print (spaces + name + ":" + value) 
+        elif isinstance(value, int):
+            print (spaces + name + ":" + str(value)) 
         elif isinstance(value,list):
             for idx,value2 in enumerate(value):
                 if isinstance(value2, str):
                     print (spaces+name+"["+str(idx)+"]:"+value2)
+                elif isinstance(value2, int):
+                    print (spaces+name+"["+str(idx)+"]:"+str(value2))
                 else:
                     print_instance(value2, max_levels, name + "["+str(idx)+"]:", level+1)
         else:
@@ -345,11 +370,13 @@ structure["CONICAL_SURFACE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
 def set_edge_index(instance):
     global edges
+    v1 = get_instance_value(instance, ["v1","vertex_id"])
+    v2 = get_instance_value(instance, ["v2", "vertex_id"])
+    edges.append([v1,v2])
+    
     object = get_instance_value(instance,"object")
     if object["name"] == "SURFACE_CURVE": 
-        v1 = get_instance_value(instance, ["v1","vertex_id"])
-        v2 = get_instance_value(instance, ["v2", "vertex_id"])
-        edges.append([v1,v2])
+        instance["data"]["edge_id"] = len(edges) -1
     elif object["name"] == "CIRCLE":
         None
     elif object["name"] == "LINE":
@@ -360,7 +387,8 @@ def set_edge_index(instance):
         None
     else:
         print ("ignored")
-    instance["data"]["edge_id"] = len(edges) -1
+        
+    
         
 structure["EDGE_CURVE"] = ["unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|CIRCLE|LINE|B_SPLINE_CURVE_WITH_KNOTS|ELLIPSE|object", "unknown5"]
 structure_func["EDGE_CURVE"] = {"first_load" : set_edge_index }
@@ -401,6 +429,7 @@ def set_vertex_index (instance):
 
 structure["VERTEX_POINT"] = ["unknown1","CARTESIAN_POINT|cartesian_point"]
 structure_func["VERTEX_POINT"] = {"first_load" : set_vertex_index}
+structure_params["VERTEX_POINT"] = {"print_verbose" : 1}
 
 #X = CLOSED_SHELL('',(#17,#137,#237,#284,#331,#338));
 structure["CLOSED_SHELL"] = ["unknown", "ADVANCED_FACE|data"]
@@ -414,8 +443,7 @@ def set_faces (instance):
                 if (fb["name"] == "FACE_BOUND"):
                     faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
                 elif (fb["name"] == "FACE_OUTER_BOUND"):
-                    None
-                    #faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
+                    faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
                 else:
                     print ("Unknown instance "  + fb["name"])
         else:
@@ -426,12 +454,15 @@ structure_func["MANIFOLD_SOLID_BREP"] = {"first_load" : set_faces}
 
 #X = DIRECTION('',(1.,0.,-0.));
 structure["DIRECTION"] = ["unknown", "values"]
+structure_params["DIRECTION"] = {"print_verbose" : 2}
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
 structure["CARTESIAN_POINT"] = ["unknown", "coordinates"]
+structure_params["CARTESIAN_POINT"] = {"print_verbose" : 2}
 
 #X = AXIS2_PLACEMENT_3D('',#12,#13,#14);
 structure["AXIS2_PLACEMENT_3D"] = ["name", "CARTESIAN_POINT|point", "DIRECTION|dir1", "DIRECTION|dir2"]
+structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
 
 #X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
 structure["APPLICATION_CONTEXT"] = ["description"]
@@ -447,7 +478,7 @@ def set_product_name(instance):
     global object_name
     object_name = get_instance_value(instance,"name")
 
-structure["PRODUCT"] = ["name", "description", "unknown1", "PRODUCT_CONTEXT|MECHANICAL_CONTEXT|contexts"]
+structure["PRODUCT"] = ["str|name", "description", "unknown1", "PRODUCT_CONTEXT|MECHANICAL_CONTEXT|contexts"]
 structure_func["PRODUCT"] = {"first_load": set_product_name}
 
 #X = PRODUCT_TYPE('part',$,(#7));
@@ -480,6 +511,9 @@ def init_object(instance):
 def import_shape(instance):
     global object_name
     print ("Importing: " + object_name)
+    #if object_name == "SIEM-PM-L00135":
+    #    print_instance (instance,3)
+    
     import_data_to_blender()
 
 structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = ["unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None]
@@ -572,6 +606,9 @@ def import_data_to_blender():
     scn.objects.active = ob
     ob.select = True 
 
+    # print (vertexs)
+    # print (edges)
+    # print (faces)
     me.from_pydata(vertexs, edges, faces)
 
     me.validate()    
@@ -579,8 +616,6 @@ def import_data_to_blender():
 
           
 def process_stp_data():
-    
-    global vertexs, edeges, faces, object_name
     
     for instance in instances:            
         if instance["name"] == "SHAPE_DEFINITION_REPRESENTATION":
@@ -641,7 +676,7 @@ if __name__ == '__main__':
     
     test_folder = "/home/jaume/src/mechanical-blender-addons/io_scene_stp/test_files/"
         
-    read_stp(test_folder + "cube.stp")
-    #read_stp(test_folder + "SIEM-CONJ-L00025.stp")
+    #read_stp(test_folder + "cube.stp")
+    read_stp(test_folder + "SIEM-CONJ-L00025.stp")
     
     
