@@ -43,9 +43,6 @@ vertexs = [] # Mesh Vertices
 edges = [] # Mesh Edges
 faces = [] # Mesh Faces
 
-#Stores MANIFOLD_SOLID_BREP processed instance numbers
-solids = []  
-
 ### COMMON FUNCTION ###
 
 def read_stp_single_line(f):
@@ -81,8 +78,15 @@ def check_instance_name (instance, name):
    
 def load_instance(instance, parent = None):
     if instance["name"] in structure:
-        if not instance["data"]:
+        if not instance["data"]:                    
             instance["data"] = {}
+            
+            instance["parent"] = parent
+            
+            if instance["name"] in structure_func:
+                if "init" in structure_func[instance["name"]]:
+                    structure_func[instance["name"]]["init"](instance)
+            
             if not (len(structure[instance["name"]]) == len(instance["params"])):
                 print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"])
             for idx,n  in enumerate(structure[instance["name"]]):
@@ -102,21 +106,35 @@ def load_instance(instance, parent = None):
                                 instance["data"][n].append(new_instance)
                             else:
                                 if len(n_exp):
-                                    print ("Error: Expected instance")
+                                    if "func" in n_exp:
+                                        None
+                                    else:
+                                        print ("Error: Expected instance")
+                                        
                                 instance["data"][n].append(a)
                     elif param[0] == '#':
                         new_instance = load_instance(get_instance(param), instance)
                         if len(n_exp) and not new_instance["name"] in n_exp:
-                            print ("Error: not expected " + new_instance["name"] + "in " + instance["number"] + " " + instance["name"])
+                            print ("Error: not expected " + new_instance["name"] + " in " + instance["number"] + " " + instance["name"])
                         elif not len(n_exp):
                             print ("loading object " + new_instance["name"] + " with no instance name defined in " + instance["number"] + " " + instance["name"])
                         instance["data"][n] = new_instance
                     else:
                         if len(n_exp):
-                            print ("Error: Expected instance")
+                            if "func" in n_exp:
+                                None
+                            else:
+                                print ("Error: Expected instance")
+                        
                         instance["data"][n] = param
             if instance["name"] in structure_func:
-                structure_func[instance["name"]](instance)
+                if "first_load" in structure_func[instance["name"]]: 
+                    structure_func[instance["name"]]["first_load"](instance)
+        else: 
+            #Already loaded
+            if instance["name"] in structure_func:
+                if "load" in structure_func[instance["name"]]:
+                    structure_func[instance["name"]]["load"](instance)
     else:
         print ("Not defined instance " + instance["number"] + " " +instance["name"])
         print ("loaded fom " + parent["number"] + " " + parent["name"])
@@ -125,11 +143,16 @@ def load_instance(instance, parent = None):
 
 def get_instance_value(instance,path, index=0):
     if isinstance(path, list): 
-        value = instance["data"][path[index]]
-        if index+1 < len(path):
-            value = get_instance_value(value,path, index+1)
-    else:
+        if path[index] in instance["data"]:
+            value = instance["data"][path[index]]
+            if index+1 < len(path):
+                value = get_instance_value(value,path, index+1)
+        else:
+            value = None
+    elif path in instance["data"]:
         value = instance["data"][path]
+    else:
+        value = None
         
     return value
 
@@ -218,8 +241,19 @@ def parse_params(str, params):
     v =  ""
     i  = 0
     while (i<len(str) and str[i] != ")"):
-        if (str[i] == ","):
-            if (v):
+        
+        if not v and str[i] == "'":
+            #string
+            while True:
+                v = v + str[i]
+                i=i+1
+                if i >= len(str) or str[i] == "'":
+                    break
+            
+        
+        if str[i] == ",":
+            #new param
+            if v:
                 params.append(v)
                 v = ""
         elif str[i] == "(":
@@ -231,7 +265,7 @@ def parse_params(str, params):
             v = v + str[i];
         
         i = i+1
-    
+        
     if (v):
         params.append(v)
     
@@ -291,30 +325,60 @@ def get_edge_loop_verts(edge_loop):
 structure["PLANE"] = ["unknown", "AXIS2_PLACEMENT_3D|axis2_placement_3d"]
 
 #X = ADVANCED_FACE('',(#18),#32,.F.);
-structure["ADVANCED_FACE"] = ["unknown","FACE_BOUND|data","PLANE|plane", "unknown2"]
+structure["ADVANCED_FACE"] = ["unknown","FACE_BOUND|FACE_OUTER_BOUND|data","PLANE|CYLINDRICAL_SURFACE|TOROIDAL_SURFACE|CONICAL_SURFACE|def", "unknown2"]
     
 #X = FACE_BOUND('',#19,.F.);
 structure["FACE_BOUND"] = ["unknown1", "EDGE_LOOP|edge_loop", "unknown2"]
+
+#X = FACE_OUTER_BOUND('',#1091,.T.);
+structure["FACE_OUTER_BOUND"] = ["unknown1", "EDGE_LOOP|edge_loop", "unknown2"]
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
 structure["EDGE_LOOP"] = ["unknown1", "ORIENTED_EDGE|oriented_edges"]
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
 structure["ORIENTED_EDGE"] = ["unknown1", "unknown2", "unknown3", "EDGE_CURVE|edge_curve", "unknown5"]
-    
+
+#X = CONICAL_SURFACE('',#512,6.052999999999996,45.000000000000142);
+structure["CONICAL_SURFACE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "uknown3"]
+
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
 def set_edge_index(instance):
     global edges
-    v1 = get_instance_value(instance, ["v1","vertex_id"])
-    v2 = get_instance_value(instance, ["v2", "vertex_id"])
-    edges.append([v1,v2])
+    object = get_instance_value(instance,"object")
+    if object["name"] == "SURFACE_CURVE": 
+        v1 = get_instance_value(instance, ["v1","vertex_id"])
+        v2 = get_instance_value(instance, ["v2", "vertex_id"])
+        edges.append([v1,v2])
+    elif object["name"] == "CIRCLE":
+        None
+    elif object["name"] == "LINE":
+        None
+    elif object["name"] == "B_SPLINE_CURVE_WITH_KNOTS":
+        None
+    elif object["name"] == "ELLIPSE": 
+        None
+    else:
+        print ("ignored")
     instance["data"]["edge_id"] = len(edges) -1
         
-structure["EDGE_CURVE"] = ["unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|surface_curve", "unknown5"]
-structure_func["EDGE_CURVE"] = set_edge_index
+structure["EDGE_CURVE"] = ["unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|CIRCLE|LINE|B_SPLINE_CURVE_WITH_KNOTS|ELLIPSE|object", "unknown5"]
+structure_func["EDGE_CURVE"] = {"first_load" : set_edge_index }
+
+#X = CIRCLE('',#3900,13.230000000000002);
+structure["CIRCLE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2"]
+
+#X= ELLIPSE('',#539,7.296415549894075,5.053)
+structure["ELLIPSE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "r1", "r2"]
 
 #X = SURFACE_CURVE('',#27,(#31,#43),.PCURVE_S1.)
 structure["SURFACE_CURVE"] = ["unknown", "LINE|line", "PCURVE|data", "unknown2"]
+
+#X = TOROIDAL_SURFACE('',#3175,1.399999999999998,0.300000000000002);
+structure["TOROIDAL_SURFACE"] = ["unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "unknown3"]
+
+#X = B_SPLINE_CURVE_WITH_KNOTS('',3,(#),.UNSPECIFIED.,.T.,.U.,(4),(0.0),.UNSPECIFIED.);
+structure ["B_SPLINE_CURVE_WITH_KNOTS"] = ["unknown", "unknown2", "CARTESIAN_POINT|data", "unknown3", "unknown4", "unkown5", "int_data_unknown", "float_data_unknown", "unknown6"]
 
 #X = PCURVE('',#32,#37);
 structure["PCURVE"] = ["unknown","PLANE|plane","DEFINITIONAL_REPRESENTATION|def_representation"]
@@ -336,27 +400,29 @@ def set_vertex_index (instance):
     instance["data"]["vertex_id"] = len(vertexs)-1
 
 structure["VERTEX_POINT"] = ["unknown1","CARTESIAN_POINT|cartesian_point"]
-structure_func["VERTEX_POINT"] = set_vertex_index
+structure_func["VERTEX_POINT"] = {"first_load" : set_vertex_index}
 
 #X = CLOSED_SHELL('',(#17,#137,#237,#284,#331,#338));
 structure["CLOSED_SHELL"] = ["unknown", "ADVANCED_FACE|data"]
 
 #X = MANIFOLD_SOLID_BREP('',#16);
 def set_faces (instance):
-     for face in get_instance_value(instance, ["closed_shell", "data"]):
+    print ("Solid data")
+    for face in get_instance_value(instance, ["closed_shell", "data"]):
         if (face["name"] == "ADVANCED_FACE"):
             for fb in get_instance_value(face,["data"]):
                 if (fb["name"] == "FACE_BOUND"):
                     faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
+                elif (fb["name"] == "FACE_OUTER_BOUND"):
+                    None
+                    #faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
                 else:
-                    print ("Unknon instance")
+                    print ("Unknown instance "  + fb["name"])
         else:
             print ("Unknown instance")
-            
-    
-            
+        
 structure["MANIFOLD_SOLID_BREP"] = ["unknown", "CLOSED_SHELL|closed_shell"]
-structure_func["MANIFOLD_SOLID_BREP"] = set_faces
+structure_func["MANIFOLD_SOLID_BREP"] = {"first_load" : set_faces}
 
 #X = DIRECTION('',(1.,0.,-0.));
 structure["DIRECTION"] = ["unknown", "values"]
@@ -374,7 +440,7 @@ structure["APPLICATION_CONTEXT"] = ["description"]
 structure["MECHANICAL_CONTEXT"] =  ["unknown", "APPLICATION_CONTEXT|application_context", "name"]
 
 #X = PRODUCT_CONTEXT('',#5,'mechanical');
-structure["PRODUCT_CONTEXT"] = ["unknown", "application_context", "name"]
+structure["PRODUCT_CONTEXT"] = ["unknown", "APPLICATION_CONTEXT|application_context", "name"]
 
 #X = PRODUCT('Cube','Cube','',(#8));
 def set_product_name(instance):
@@ -382,31 +448,61 @@ def set_product_name(instance):
     object_name = get_instance_value(instance,"name")
 
 structure["PRODUCT"] = ["name", "description", "unknown1", "PRODUCT_CONTEXT|MECHANICAL_CONTEXT|contexts"]
-structure_func["PRODUCT"] = set_product_name
+structure_func["PRODUCT"] = {"first_load": set_product_name}
 
 #X = PRODUCT_TYPE('part',$,(#7));
 structure["PRODUCT_TYPE"] = ["type", "unknwown1", "PRODUCT|products"]
 
 #X = PRODUCT_DEFINITION_FORMATION('','',#7);
-structure["PRODUCT_DEFINITION_FORMATION"] = ["unknown1", "unknown2", "product"]
+structure["PRODUCT_DEFINITION_FORMATION"] = ["unknown1", "unknown2", "PRODUCT|product"]
 
 #X = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design')
-structure["PRODUCT_DEFINITION_CONTEXT"] = ["name", "application_context", "type"]
+structure["PRODUCT_DEFINITION_CONTEXT"] = ["name", "APPLICATION_CONTEXT|application_context", "type"]
 
 #X = PRODUCT_DEFINITION('design','',#6,#9);
-structure["PRODUCT_DEFINITION"] = ["type", "unknown1", "product_definition_formation", "product_definition_context"]
+structure["PRODUCT_DEFINITION"] = ["type", "unknown1", "PRODUCT_DEFINITION_FORMATION|formation", "PRODUCT_DEFINITION_CONTEXT|context"]
 
 #X = PRODUCT_DEFINITION_SHAPE('','',#5);
-structure["PRODUCT_DEFINITION_SHAPE"] = ["unknown1", "unknown2", "product_definition"]
+structure["PRODUCT_DEFINITION_SHAPE"] = ["name", "desc", "PRODUCT_DEFINITION|NEXT_ASSEMBLY_USAGE_OCCURRENCE|product_definition"]
+
+#X = NEXT_ASSEMBLY_USAGE_OCCURRENCE('SIEM-PM-L00135:1','SIEM-PM-L00135:1','SIEM-PM-L00135:1',#12,#126,'SIEM-PM-L00135:1');
+structure["NEXT_ASSEMBLY_USAGE_OCCURRENCE"] = ["name","desc","unknown_str1","PRODUCT_DEFINITION|product_definition_1", "PRODUCT_DEFINITION|product_definition_2", "unknown_str2"]
 
 #X = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#345);
-structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = ["unknown1"," AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None]
+def init_object(instance):
+    global object_name
+    print ("Loading Object " + object_name)
+    global vertexs, edges, faces
+    vertexs = []
+    edges = []
+    faces = []
+    
+def import_shape(instance):
+    global object_name
+    print ("Importing: " + object_name)
+    import_data_to_blender()
+
+structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = ["unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None]
+structure_func["ADVANCED_BREP_SHAPE_REPRESENTATION"] = {"init" : init_object, "first_load" : import_shape }
 
 #X = SHAPE_REPRESENTATION('',(#37,#977,#1751,#3984),#36);
-structure["SHAPE_REPRESENTATION"] = ["unknown1", "data", None]
+def set_shape_name(instance):
+    definition = get_instance_value(instance, "shape_definition_representation")
+    if definition:
+        set_product_name(get_instance_value(definition,["product_definition_shape", "product_definition", "formation", "product"]))
+    
+structure["SHAPE_REPRESENTATION"] = ["unknown1", "AXIS2_PLACEMENT_3D|data", None]
+structure_func["SHAPE_REPRESENTATION"] = {"load" : set_shape_name }
 
 #X = SHAPE_DEFINITION_REPRESENTATION(#4,#10);
-structure["SHAPE_DEFINITION_REPRESENTATION"] = ["product_definition_shape", "SHAPE_REPRESENTATION|ADVANCED_BREP_SHAPE_REPRESENTATION|shape_representation"]
+def set_shape_representation_parent(instance):
+    ## To get the shape definition representation, when accessing from SHAPE_REPRESENTATION_RELATIONSHIP
+    shape = get_instance_value(instance,"representation");
+    if shape["name"] == "SHAPE_REPRESENTATION":
+        shape["data"]["shape_definition_representation"] = instance
+
+structure["SHAPE_DEFINITION_REPRESENTATION"] = ["PRODUCT_DEFINITION_SHAPE|product_definition_shape", "SHAPE_REPRESENTATION|ADVANCED_BREP_SHAPE_REPRESENTATION|representation"]
+structure_func["SHAPE_DEFINITION_REPRESENTATION"] = {"first_load" : set_shape_representation_parent}
 
 #X = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#78,#887,#1748,#2092,#2394,#2684,#2685,#3225,#3226,#3227,#3228,#3969),#67);
 structure["MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"] = ["unknown1", "STYLED_ITEM|data", None]
@@ -418,6 +514,7 @@ structure["PRESENTATION_STYLE_ASSIGNMENT"] = ["SURFACE_STYLE_USAGE|CURVE_STYLE|s
 structure["SURFACE_STYLE_USAGE"] = ["unknown", "SURFACE_SIDE_STYLE|side_style"]
 
 #X = SURFACE_SIDE_STYLE('',(#356));
+#X = SURFACE_SIDE_STYLE('192,192,192',(#3221));
 structure["SURFACE_SIDE_STYLE"] = ["unknown", "SURFACE_STYLE_FILL_AREA|styles"]
 
 #X = SURFACE_STYLE_FILL_AREA(#357);
@@ -436,61 +533,64 @@ structure["COLOUR_RGB"] = ["unknown", "red", "green", "blue"]
 structure["CURVE_STYLE"] = ["unknown","DRAUGHTING_PRE_DEFINED_CURVE_FONT|curve_font", "unknown_func", "COLOUR_RGB|color"]
 
 #X = STYLED_ITEM('',(#77),#73);
-structure["STYLED_ITEM"] = ["unknown1", "PRESENTATION_STYLE_ASSIGNMENT|data", "TRIMMED_CURVE|MANIFOLD_SOLID_BREP|object"]
+structure["STYLED_ITEM"] = ["unknown1", "PRESENTATION_STYLE_ASSIGNMENT|data", "TRIMMED_CURVE|MANIFOLD_SOLID_BREP|ADVANCED_FACE|object"]
 
 #X = DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');
 structure["DRAUGHTING_PRE_DEFINED_CURVE_FONT"] = ["unkown"]
+
+#X = TRIMMED_CURVE('',#970,(PARAMETER_VALUE(0.0),#967),(PARAMETER_VALUE(1.0),#971),.T.,.PARAMETER.);
+structure["TRIMMED_CURVE"] = ["unknown1", "LINE|line", "func|CARTESIAN_POINT|p1_data", "func|CARTESIAN_POINT|p2_data", "unknown1", "unknown2"]
   
+#X = CYLINDRICAL_SURFACE('',#3893,13.230000000000002);
+structure["CYLINDRICAL_SURFACE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement_3d", "unknown"]
+  
+#X = SHAPE_REPRESENTATION_RELATIONSHIP('SRR','None',#2093,#1838);
+structure["SHAPE_REPRESENTATION_RELATIONSHIP"] = ["unknown1", "unknown2", "ADVANCED_BREP_SHAPE_REPRESENTATION|GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION|shape","SHAPE_REPRESENTATION|shape_representation"]
+
+#X = GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION('GBSSR',(#80),#36);
+structure["GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION"] = ["unknown", "GEOMETRIC_SET|geomteric_set", None]
+
+#X = GEOMETRIC_SET('GEOSET',(#73,#112));
+structure["GEOMETRIC_SET"]= ["unknown","TRIMMED_CURVE|data"]
+
 ### DATA PROCESSING ###
+
+def import_data_to_blender():
+    
+    global object_name
+    global vertexs, edges, faces    
+                
+    if not object_name:
+        object_name = "Unknown Object"
+        
+    print ("Importing " + object_name)
+            
+    me = bpy.data.meshes.new(object_name)    
+    ob = bpy.data.objects.new(object_name, me)
+    scn = bpy.context.scene
+    scn.objects.link(ob)
+    scn.objects.active = ob
+    ob.select = True 
+
+    me.from_pydata(vertexs, edges, faces)
+
+    me.validate()    
+    me.update()
+
           
 def process_stp_data():
     
     global vertexs, edeges, faces, object_name
     
+    for instance in instances:            
+        if instance["name"] == "SHAPE_DEFINITION_REPRESENTATION":
+            load_instance(instance)
+            
     for instance in instances:
-        if instance["name"] == "PRODUCT_TYPE":
-            # loads part name
-            load_instance(instance)
-            if get_instance_value(instance, ["type"]) == "'part'":
-                None
-            else:
-                print ("Unknown product type: "  + get_instance_value(instance, ["type"]))
-                
-    for instance in instances:
-
-        if instance["name"] == "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION":
-            vertexs = []
-            edges = [] 
-            faces = []    
-            
-            #fills object data
+        if instance["name"] == "SHAPE_REPRESENTATION_RELATIONSHIP":
             load_instance(instance)
             
-            if not object_name:
-                object_name = "Unknown Object"
-                
-            print ("Importing " + object_name)
-            
-            continue
-        
-            me = bpy.data.meshes.new(object_name)    
-            ob = bpy.data.objects.new(object_name, me)
-            scn = bpy.context.scene
-            scn.objects.link(ob)
-            scn.objects.active = ob
-            ob.select = True 
-    
-            me.from_pydata(vertexs, edges, faces)
-
-            me.validate()    
-            me.update()
-            
-
-        
-        if (False and instance["name"] == "SHAPE_DEFINITION_REPRESENTATION"):
-            #object is loaded previosly
-            load_instance(instance)
-                
+    return
                
             
     #printed = []
