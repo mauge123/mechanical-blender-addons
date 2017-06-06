@@ -40,11 +40,12 @@ instances = []
 data = []   # Instance blender data
 
 object_name = ""
+object_location = [0,0,0]
 vertexs = [] # Mesh Vertices
 edges = [] # Mesh Edges
 faces = [] # Mesh Faces
 
-print_verbose_level = 0
+print_verbose_level = 10
 
 ### COMMON FUNCTION ###
 
@@ -65,7 +66,9 @@ def add_instance (line, name, params, data, number):
     id = get_instance_number(number);
     while (len(instances) < id): 
         instances.append({"name" : ""})
-    instances.insert(id,{"name" : name, "params" : params,  "line" : line, "data" : data, "number" : number}) 
+    new_instance = {"name" : name, "params" : params,  "line" : line, "data" : data, "number" : number}
+    instances.insert(id,new_instance) 
+    return new_instance
 
 def get_instance(number):
     global instances
@@ -78,76 +81,94 @@ def get_instance(number):
 def check_instance_name (instance, name):
      if (instance["name"] != name):
         print ("ERROR: expected " + name + ", found "+ instance["name"] + instance["number"])
+        
+def execute_instance_functions(instance, type):
+    if instance["name"] in structure_func:
+        if type in structure_func[instance["name"]]:
+            func = structure_func[instance["name"]][type]
+            if isinstance(func, list):
+                for f in func:
+                    f(instance)
+            else:
+                func(instance)
+                
+def load_referenced_instance(instance, number, n_exp):
+    new_instance = load_instance(get_instance(number),instance)
+    if len(n_exp) and not new_instance["name"] in n_exp:
+        if not "multiple" in new_instance and not "multiple" in n_exp:
+            print ("Error: Not expected " + new_instance["name"] + " in " +  instance["number"] + " " + instance ["name"])
+    elif not len(n_exp):
+        print ("loading object " + new_instance["name"] +" with no instance name defined in " + instance["number"] + " " + instance["name"])
+    return new_instance
+    
+def check_instance_value(instance, value, n_exp):
+    if len(n_exp):
+        if "func" in n_exp:
+            None
+        elif "float" in n_exp:
+            value = float(value)
+        elif "str" in n_exp:
+            if value[0] == "'" and value[-1] == "'":
+                value = value[1:-1]
+            else:
+                print ("Expected 'string'")
+        else:
+            print ("Error: Expected instance")
+    
+    return value
    
 def load_instance(instance, parent = None):
+    
     if instance["name"] in structure:
+        st = structure[instance["name"]] 
+        
+        if isinstance(st,list):
+            for st in structure[instance["name"]]:
+                if (len(st) == len(instance["params"])):         
+                    break
+        
+        if st and not isinstance(st,tuple):
+            print("ERROR")
+            return instance
+        
         if not instance["data"]:                    
             instance["data"] = {}
             
             instance["parent"] = parent
             
-            if instance["name"] in structure_func:
-                if "init" in structure_func[instance["name"]]:
-                    structure_func[instance["name"]]["init"](instance)
+            execute_instance_functions(instance,"init")
             
-            if not (len(structure[instance["name"]]) == len(instance["params"])):
-                print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"])
-            for idx,n  in enumerate(structure[instance["name"]]):
-                if n:
-                    n_exp = n.split("|")
-                    n = n_exp.pop()
-                    param = instance["params"][idx]
-                    if isinstance(param, list):
-                        instance["data"][n] = []
-                        for a in instance["params"][idx]:
-                            if a[0] == '#':
-                                new_instance = load_instance(get_instance(a),instance)
-                                if len(n_exp) and not new_instance["name"] in n_exp:
-                                    print ("Error: not expected " + new_instance["name"] + " in " +  instance["number"] + " " + instance ["name"])
-                                elif not len(n_exp):
-                                    print ("loading object " + new_instance["name"] +" with no instance name defined in " + instance["number"] + " " + instance["name"])
-                                instance["data"][n].append(new_instance)
-                            else:
-                                if len(n_exp):
-                                    if "func" in n_exp:
-                                        None
-                                    elif "str" in n_exp:
-                                        if a[0] == "'" and a[-1] == "'":
-                                            a = a[1:-1]
-                                        else:
-                                            print ("Expected 'string'")
-                                    else:
-                                        print ("Error: Expected instance")
-                                        
-                                instance["data"][n].append(a)
-                    elif param[0] == '#':
-                        new_instance = load_instance(get_instance(param), instance)
-                        if len(n_exp) and not new_instance["name"] in n_exp:
-                            print ("Error: not expected " + new_instance["name"] + " in " + instance["number"] + " " + instance["name"])
-                        elif not len(n_exp):
-                            print ("loading object " + new_instance["name"] + " with no instance name defined in " + instance["number"] + " " + instance["name"])
-                        instance["data"][n] = new_instance
-                    else:
-                        if len(n_exp):
-                            if "func" in n_exp:
-                                None
-                            elif "str" in n_exp:
-                                if param[0] == "'" and param[-1] == "'":
-                                    param = param[1:-1]
+            if st:
+                
+                if not (len(st) == len(instance["params"])):
+                    print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"] + ". IGNORED")
+                    return instance
+                for idx,n  in enumerate(st):
+                    if n:
+                        n_exp = n.split("|")
+                        n = n_exp.pop()  #last postion is the data name
+                        param = instance["params"][idx]
+
+                        if isinstance(param, list):
+                            instance["data"][n] = []
+                            for a in instance["params"][idx]:
+                                if a[0] == '#':
+                                    instance["data"][n].append(load_referenced_instance(instance,a, n_exp))
                                 else:
-                                    print ("Expected 'string'")
-                            else:
-                                print ("Error: Expected instance")
+                                    instance["data"][n].append(check_instance_value(instance, a, n_exp))
+                                    
+                        elif param[0] == '#':
+                            instance["data"][n] = load_referenced_instance(instance, param, n_exp)
+                        else:
+                            instance["data"][n] = check_instance_value(instance, param, n_exp)
                         
-                        instance["data"][n] = param
-            if instance["name"] in structure_func:
-                if "first_load" in structure_func[instance["name"]]: 
-                    structure_func[instance["name"]]["first_load"](instance)
+            execute_instance_functions(instance,"first_load")
         else: 
             #Already loaded
-            if instance["name"] in structure_func:
-                if "load" in structure_func[instance["name"]]:
-                    structure_func[instance["name"]]["load"](instance)
+            execute_instance_functions(instance,"load")
+    elif "multiple" in instance:
+        for sub_instance in instance["multiple"]:
+            load_instance(sub_instance,parent)
     else:
         print ("Not defined instance " + instance["number"] + " " +instance["name"])
         print ("loaded fom " + parent["number"] + " " + parent["name"])
@@ -169,6 +190,7 @@ def get_instance_value(instance,path, index=0):
         
     return value
 
+# Debug function
 def print_instance(instance, max_levels=-1, name = "", level =0):
     global print_verbose_level
     
@@ -190,13 +212,13 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
         value = instance["data"][name]
         if isinstance(value, str):
             print (spaces + name + ":" + value) 
-        elif isinstance(value, int):
+        elif isinstance(value, int) or isinstance(value, float):
             print (spaces + name + ":" + str(value)) 
         elif isinstance(value,list):
             for idx,value2 in enumerate(value):
                 if isinstance(value2, str):
                     print (spaces+name+"["+str(idx)+"]:"+value2)
-                elif isinstance(value2, int):
+                elif isinstance(value2, int) or isinstance(value2, float): 
                     print (spaces+name+"["+str(idx)+"]:"+str(value2))
                 else:
                     print_instance(value2, max_levels, name + "["+str(idx)+"]:", level+1)
@@ -225,6 +247,33 @@ def read_stp_header(f):
 
 
 ### DATA READING ####
+def parse_stp_instance_multiple(instance, content, number):
+    pattern = r'\s?(\w[\w\d_]*)\((.*)\)$'
+    c=0
+    i=0
+    start =0
+    while i < len(content):
+        if content[i] == '(':
+            c=c+1
+        if content[i] == ')':
+            c=c-1
+            if c == 0:
+                i = i +1
+                sub_instance = content[start:i]
+                match = re.match(pattern, sub_instance)
+                parsed = list(match.groups()) if match else []
+                if (len(parsed)):
+                    #X = NAME(a,b,...);
+                    n_params = []
+                    parse_params(parsed[1],n_params)
+                    instance["multiple"].append({"name" : parsed[0], "params" : n_params, "number": number, "data" : data})
+                else:
+                    print ("Error on parse")
+                
+                start = i
+        i=i+1 
+
+
 def parse_stp_data_line(line):
     
     pattern = r'(#[\d]*)\s?=\s?(\w[\w\d_]*)\((.*)\)$'
@@ -241,9 +290,10 @@ def parse_stp_data_line(line):
         match = re.match(pattern, line)
         parsed = list(match.groups()) if match else []
         if (len(parsed)):
-            ## Unknown at this moment
             #X = ( GEOMETRIC_REPRESENTATION_CONTEXT(2) PARAMETRIC_REPRESENTATION_CONTEXT() REPRESENTATION_CONTEXT('2D SPACE','') );
-            add_instance(line, name= "", params = [], data="", number=parsed[0])
+            instance = add_instance(line, name= "", params = [], data="", number=parsed[0])
+            instance["multiple"] = []
+            parse_stp_instance_multiple(instance,parsed[1], number=parsed[0])
         else:
             print ("Unknown match for: " + line);
         
@@ -275,7 +325,6 @@ def parse_params(str, params):
                 if i >= len(str) or str[i] == "'":
                     break
             
-        
         if str[i] == ",":
             #new param
             if v:
@@ -347,36 +396,40 @@ def get_edge_loop_verts(edge_loop):
 ### INSTANCE STRUCTURES ####
 
 #X= PLANE('',#33);
-structure["PLANE"] = ["unknown", "AXIS2_PLACEMENT_3D|axis2_placement_3d"]
+structure["PLANE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement_3d"
 
 #X = ADVANCED_FACE('',(#18),#32,.F.);
-structure["ADVANCED_FACE"] = ["unknown","FACE_BOUND|FACE_OUTER_BOUND|data","PLANE|CYLINDRICAL_SURFACE|TOROIDAL_SURFACE|CONICAL_SURFACE|def", "unknown2"]
+structure["ADVANCED_FACE"] = "unknown","FACE_BOUND|FACE_OUTER_BOUND|data","PLANE|CYLINDRICAL_SURFACE|TOROIDAL_SURFACE|CONICAL_SURFACE|SPHERICAL_SURFACE|SURFACE_OF_REVOLUTION|def", "unknown2"
     
 #X = FACE_BOUND('',#19,.F.);
-structure["FACE_BOUND"] = ["unknown1", "EDGE_LOOP|edge_loop", "unknown2"]
+structure["FACE_BOUND"] = "unknown1", "EDGE_LOOP|VERTEX_LOOP|loop", "unknown2"
 
 #X = FACE_OUTER_BOUND('',#1091,.T.);
-structure["FACE_OUTER_BOUND"] = ["unknown1", "EDGE_LOOP|edge_loop", "unknown2"]
+structure["FACE_OUTER_BOUND"] = "unknown1", "EDGE_LOOP|edge_loop", "unknown2"
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
-structure["EDGE_LOOP"] = ["unknown1", "ORIENTED_EDGE|oriented_edges"]
+structure["EDGE_LOOP"] = "unknown1", "ORIENTED_EDGE|oriented_edges"
+
+#X = VERTEX_LOOP('',#20);
+structure["VERTEX_LOOP"] = "unknown1", "VERTEX_POINT|vertex"
 
 #X = ORIENTED_EDGE('',*,*,#21,.F.);
-structure["ORIENTED_EDGE"] = ["unknown1", "unknown2", "unknown3", "EDGE_CURVE|edge_curve", "unknown5"]
+structure["ORIENTED_EDGE"] = "unknown1", "unknown2", "unknown3", "EDGE_CURVE|edge_curve", "unknown5"
 
 #X = CONICAL_SURFACE('',#512,6.052999999999996,45.000000000000142);
-structure["CONICAL_SURFACE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "uknown3"]
+structure["CONICAL_SURFACE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "uknown3"
 
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
-def set_edge_index(instance):
+def set_edge(instance):
     global edges
-    v1 = get_instance_value(instance, ["v1","vertex_id"])
-    v2 = get_instance_value(instance, ["v2", "vertex_id"])
-    edges.append([v1,v2])
+    
+    #v1 = get_instance_value(instance, ["v1","vertex_id"])
+    #v2 = get_instance_value(instance, ["v2", "vertex_id"])
+    #edges.append([v1,v2])
     
     object = get_instance_value(instance,"object")
     if object["name"] == "SURFACE_CURVE": 
-        instance["data"]["edge_id"] = len(edges) -1
+        None
     elif object["name"] == "CIRCLE":
         None
     elif object["name"] == "LINE":
@@ -385,116 +438,155 @@ def set_edge_index(instance):
         None
     elif object["name"] == "ELLIPSE": 
         None
+    elif object["name"] == "SEAM_CURVE": 
+        None
     else:
-        print ("ignored")
+        print ("Unkown object")
         
-    
-        
-structure["EDGE_CURVE"] = ["unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|CIRCLE|LINE|B_SPLINE_CURVE_WITH_KNOTS|ELLIPSE|object", "unknown5"]
-structure_func["EDGE_CURVE"] = {"first_load" : set_edge_index }
+structure["EDGE_CURVE"] = "unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|CIRCLE|LINE|B_SPLINE_CURVE_WITH_KNOTS|ELLIPSE|SEAM_CURVE|object", "unknown5"
+structure_func["EDGE_CURVE"] = {"first_load" : set_edge }
 
 #X = CIRCLE('',#3900,13.230000000000002);
-structure["CIRCLE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2"]
+structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2"
 
 #X= ELLIPSE('',#539,7.296415549894075,5.053)
-structure["ELLIPSE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "r1", "r2"]
+structure["ELLIPSE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "r1", "r2"
 
 #X = SURFACE_CURVE('',#27,(#31,#43),.PCURVE_S1.)
-structure["SURFACE_CURVE"] = ["unknown", "LINE|line", "PCURVE|data", "unknown2"]
+structure["SURFACE_CURVE"] = "unknown", "LINE|CIRCLE|object", "PCURVE|data", "unknown2"
+
+#X = SPHERICAL_SURFACE('',#387,4.25);
+structure["SPHERICAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|radi"
 
 #X = TOROIDAL_SURFACE('',#3175,1.399999999999998,0.300000000000002);
-structure["TOROIDAL_SURFACE"] = ["unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "unknown3"]
+structure["TOROIDAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|r1", "float|r2"
+
+#X = SURFACE_OF_REVOLUTION('',#34,#39);
+structure["SURFACE_OF_REVOLUTION"] = "unknown", "circle|circle", "AXIS1_PLACEMENT_3D|axis"
+
 
 #X = B_SPLINE_CURVE_WITH_KNOTS('',3,(#),.UNSPECIFIED.,.T.,.U.,(4),(0.0),.UNSPECIFIED.);
-structure ["B_SPLINE_CURVE_WITH_KNOTS"] = ["unknown", "unknown2", "CARTESIAN_POINT|data", "unknown3", "unknown4", "unkown5", "int_data_unknown", "float_data_unknown", "unknown6"]
+# ( B_SPLINE_CURVE_WITH_KNOTS((1),(0.0),.UNSPECIFIED.))
+structure ["B_SPLINE_CURVE_WITH_KNOTS"] = []
+t = "int_data_unknown", "float_data_unknown", "unknown6"
+structure ["B_SPLINE_CURVE_WITH_KNOTS"].append(t)
+t= "unknown", "unknown2", "CARTESIAN_POINT|data", "unknown3", "unknown4", "unkown5", "int_data_unknown", "float_data_unknown", "unknown6"
+structure ["B_SPLINE_CURVE_WITH_KNOTS"].append(t)
 
 #X = PCURVE('',#32,#37);
-structure["PCURVE"] = ["unknown","PLANE|plane","DEFINITIONAL_REPRESENTATION|def_representation"]
+structure["PCURVE"] = "unknown","PLANE|SURFACE_OF_REVOLUTION|object","DEFINITIONAL_REPRESENTATION|def_representation"
+
+#X = SEAM_CURVE('',#27,(#32,#48),.PCURVE_S1.);
+structure["SEAM_CURVE"] = "unknown", "CIRCLE|circle", "PCURVE|data", "unknown2"
+
+#X = SURFACE_OF_REVOLUTION('',#34,#39);
+structure["SURFACE_OF_REVOLUTION"] = "unknown", "CIRCLE|circle", "AXIS1_PLACEMENT|axis"
 
 #X = DEFINITIONAL_REPRESENTATION('',(#38),#42);
-structure["DEFINITIONAL_REPRESENTATION"] = ["unkown", "LINE|data", None]
+structure["DEFINITIONAL_REPRESENTATION"] = "unkown", "LINE|multiple|data", None
 
 #X = LINE('',#28,#29);
-structure["LINE"] = ["unknown1", "CARTESIAN_POINT|cartesian_point", "VECTOR|vector"]
+structure["LINE"] = "unknown1", "CARTESIAN_POINT|cartesian_point", "VECTOR|vector"
 
 #X = VECTOR('',#30,1.);
-structure["VECTOR"] = ["unknown1", "DIRECTION|direction", "value"]
+structure["VECTOR"] = "unknown1", "DIRECTION|direction", "value"
 
 #X = VERTEX_POINT('',#23);
 def set_vertex_index (instance):
     global vertexs
     co = get_instance_value(instance, ["cartesian_point","coordinates"])
-    vertexs.append ([float(co[0]), float(co[1]), float(co[2])])
+    vertexs.append ([co[0], co[1], co[2]])
     instance["data"]["vertex_id"] = len(vertexs)-1
 
-structure["VERTEX_POINT"] = ["unknown1","CARTESIAN_POINT|cartesian_point"]
+structure["VERTEX_POINT"] = "unknown1","CARTESIAN_POINT|cartesian_point"
 structure_func["VERTEX_POINT"] = {"first_load" : set_vertex_index}
 structure_params["VERTEX_POINT"] = {"print_verbose" : 1}
 
 #X = CLOSED_SHELL('',(#17,#137,#237,#284,#331,#338));
-structure["CLOSED_SHELL"] = ["unknown", "ADVANCED_FACE|data"]
+structure["CLOSED_SHELL"] = "unknown", "ADVANCED_FACE|data"
 
 #X = MANIFOLD_SOLID_BREP('',#16);
 def set_faces (instance):
     print ("Solid data")
     for face in get_instance_value(instance, ["closed_shell", "data"]):
         if (face["name"] == "ADVANCED_FACE"):
-            for fb in get_instance_value(face,["data"]):
-                if (fb["name"] == "FACE_BOUND"):
-                    faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
-                elif (fb["name"] == "FACE_OUTER_BOUND"):
-                    faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
-                else:
-                    print ("Unknown instance "  + fb["name"])
+            obj = get_instance_value(face,"def")
+            if obj["name"] == "PLANE":
+                for fb in get_instance_value(face,["data"]):
+                    if (fb["name"] == "FACE_BOUND"):
+                        oedges = get_instance_value(fb, ["loop","oriented_edges"])
+                        if oedges:
+                            for oe in oedges:
+                                v1 = get_instance_value(oe, ["edge_curve", "v1","vertex_id"])
+                                v2 = get_instance_value(oe, ["edge_curve", "v2", "vertex_id"])
+                                edges.append([v1,v2])
+                                    
+                            faces.append(get_edge_loop_verts(get_instance_value(fb, ["loop"])))
+                    elif (fb["name"] == "FACE_OUTER_BOUND"):
+                        None
+                        #faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
+                    else:
+                        print ("Unknown instance "  + fb["name"])
+            elif obj["name"] == "TOROIDAL_SURFACE":
+                None
+            else:
+                print ("Unknow definition " + obj["name"])
         else:
             print ("Unknown instance")
         
-structure["MANIFOLD_SOLID_BREP"] = ["unknown", "CLOSED_SHELL|closed_shell"]
+structure["MANIFOLD_SOLID_BREP"] = "unknown", "CLOSED_SHELL|closed_shell"
 structure_func["MANIFOLD_SOLID_BREP"] = {"first_load" : set_faces}
 
 #X = DIRECTION('',(1.,0.,-0.));
-structure["DIRECTION"] = ["unknown", "values"]
+structure["DIRECTION"] = "unknown", "values"
 structure_params["DIRECTION"] = {"print_verbose" : 2}
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
-structure["CARTESIAN_POINT"] = ["unknown", "coordinates"]
+structure["CARTESIAN_POINT"] = "unknown", "float|coordinates"
 structure_params["CARTESIAN_POINT"] = {"print_verbose" : 2}
 
+#X = AXIS1_PLACEMENT('',#40,#41);
+structure["AXIS1_PLACEMENT"] = "name", "CARTESIAN_POINT|point", "DIRECTION|dir"
+structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
+
 #X = AXIS2_PLACEMENT_3D('',#12,#13,#14);
-structure["AXIS2_PLACEMENT_3D"] = ["name", "CARTESIAN_POINT|point", "DIRECTION|dir1", "DIRECTION|dir2"]
+structure["AXIS2_PLACEMENT_3D"] = "name", "CARTESIAN_POINT|point", "DIRECTION|dir1", "DIRECTION|dir2"
 structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
 
 #X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
-structure["APPLICATION_CONTEXT"] = ["description"]
+structure["APPLICATION_CONTEXT"] = "description",
 
 #X = MECHANICAL_CONTEXT('',#2,'mechanical');
-structure["MECHANICAL_CONTEXT"] =  ["unknown", "APPLICATION_CONTEXT|application_context", "name"]
+structure["MECHANICAL_CONTEXT"] =  "unknown", "APPLICATION_CONTEXT|application_context", "name"
 
 #X = PRODUCT_CONTEXT('',#5,'mechanical');
-structure["PRODUCT_CONTEXT"] = ["unknown", "APPLICATION_CONTEXT|application_context", "name"]
+structure["PRODUCT_CONTEXT"] = "unknown", "APPLICATION_CONTEXT|application_context", "name"
 
 #X = PRODUCT('Cube','Cube','',(#8));
 def set_product_name(instance):
     global object_name
     object_name = get_instance_value(instance,"name")
 
-structure["PRODUCT"] = ["str|name", "description", "unknown1", "PRODUCT_CONTEXT|MECHANICAL_CONTEXT|contexts"]
+structure["PRODUCT"] = "str|name", "description", "unknown1", "PRODUCT_CONTEXT|MECHANICAL_CONTEXT|contexts"
 structure_func["PRODUCT"] = {"first_load": set_product_name}
 
 #X = PRODUCT_TYPE('part',$,(#7));
-structure["PRODUCT_TYPE"] = ["type", "unknwown1", "PRODUCT|products"]
+structure["PRODUCT_TYPE"] = "type", "unknwown1", "PRODUCT|products"
 
 #X = PRODUCT_DEFINITION_FORMATION('','',#7);
-structure["PRODUCT_DEFINITION_FORMATION"] = ["unknown1", "unknown2", "PRODUCT|product"]
+structure["PRODUCT_DEFINITION_FORMATION"] = "unknown1", "unknown2", "PRODUCT|product"
+
+#X = PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE(' ','NONE',#161,.NOT_KNOWN.);
+structure["PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE"] = "unknown1", "unknown2", "PRODUCT|product", "unknown4"
 
 #X = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design')
-structure["PRODUCT_DEFINITION_CONTEXT"] = ["name", "APPLICATION_CONTEXT|application_context", "type"]
+structure["PRODUCT_DEFINITION_CONTEXT"] = "name", "APPLICATION_CONTEXT|application_context", "type"
 
 #X = PRODUCT_DEFINITION('design','',#6,#9);
-structure["PRODUCT_DEFINITION"] = ["type", "unknown1", "PRODUCT_DEFINITION_FORMATION|formation", "PRODUCT_DEFINITION_CONTEXT|context"]
+structure["PRODUCT_DEFINITION"] = "type", "unknown1", "PRODUCT_DEFINITION_FORMATION|PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE|formation", "PRODUCT_DEFINITION_CONTEXT|context"
 
 #X = PRODUCT_DEFINITION_SHAPE('','',#5);
-structure["PRODUCT_DEFINITION_SHAPE"] = ["name", "desc", "PRODUCT_DEFINITION|NEXT_ASSEMBLY_USAGE_OCCURRENCE|product_definition"]
+structure["PRODUCT_DEFINITION_SHAPE"] = "name", "desc", "PRODUCT_DEFINITION|NEXT_ASSEMBLY_USAGE_OCCURRENCE|product_definition"
 
 #X = NEXT_ASSEMBLY_USAGE_OCCURRENCE('SIEM-PM-L00135:1','SIEM-PM-L00135:1','SIEM-PM-L00135:1',#12,#126,'SIEM-PM-L00135:1');
 structure["NEXT_ASSEMBLY_USAGE_OCCURRENCE"] = ["name","desc","unknown_str1","PRODUCT_DEFINITION|product_definition_1", "PRODUCT_DEFINITION|product_definition_2", "unknown_str2"]
@@ -508,15 +600,19 @@ def init_object(instance):
     edges = []
     faces = []
     
+    for i in range(0,3):
+        object_location[i] = 0
+    
 def import_shape(instance):
     global object_name
     print ("Importing: " + object_name)
-    #if object_name == "SIEM-PM-L00135":
-    #    print_instance (instance,3)
+    if object_name == "inafag_6010_brbohxyclh6y8oik8swwpry0n_1":
+        None
+        #print_instance (instance,4)
     
     import_data_to_blender()
 
-structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = ["unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None]
+structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None
 structure_func["ADVANCED_BREP_SHAPE_REPRESENTATION"] = {"init" : init_object, "first_load" : import_shape }
 
 #X = SHAPE_REPRESENTATION('',(#37,#977,#1751,#3984),#36);
@@ -524,18 +620,18 @@ def set_shape_name(instance):
     definition = get_instance_value(instance, "shape_definition_representation")
     if definition:
         set_product_name(get_instance_value(definition,["product_definition_shape", "product_definition", "formation", "product"]))
-    
-structure["SHAPE_REPRESENTATION"] = ["unknown1", "AXIS2_PLACEMENT_3D|data", None]
+
+structure["SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|data", None
 structure_func["SHAPE_REPRESENTATION"] = {"load" : set_shape_name }
 
 #X = SHAPE_DEFINITION_REPRESENTATION(#4,#10);
 def set_shape_representation_parent(instance):
-    ## To get the shape definition representation, when accessing from SHAPE_REPRESENTATION_RELATIONSHIP
+    ## Allow get the shape definition representation, when accessing from SHAPE_REPRESENTATION_RELATIONSHIP
     shape = get_instance_value(instance,"representation");
     if shape["name"] == "SHAPE_REPRESENTATION":
         shape["data"]["shape_definition_representation"] = instance
 
-structure["SHAPE_DEFINITION_REPRESENTATION"] = ["PRODUCT_DEFINITION_SHAPE|product_definition_shape", "SHAPE_REPRESENTATION|ADVANCED_BREP_SHAPE_REPRESENTATION|representation"]
+structure["SHAPE_DEFINITION_REPRESENTATION"] = "PRODUCT_DEFINITION_SHAPE|product_definition_shape", "SHAPE_REPRESENTATION|ADVANCED_BREP_SHAPE_REPRESENTATION|representation"
 structure_func["SHAPE_DEFINITION_REPRESENTATION"] = {"first_load" : set_shape_representation_parent}
 
 #X = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#78,#887,#1748,#2092,#2394,#2684,#2685,#3225,#3226,#3227,#3228,#3969),#67);
@@ -545,59 +641,79 @@ structure["MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"] = ["unknown
 structure["PRESENTATION_STYLE_ASSIGNMENT"] = ["SURFACE_STYLE_USAGE|CURVE_STYLE|styles"]
 
 #X= SURFACE_STYLE_USAGE(.BOTH.,#355);
-structure["SURFACE_STYLE_USAGE"] = ["unknown", "SURFACE_SIDE_STYLE|side_style"]
+structure["SURFACE_STYLE_USAGE"] = "unknown", "SURFACE_SIDE_STYLE|side_style"
 
 #X = SURFACE_SIDE_STYLE('',(#356));
 #X = SURFACE_SIDE_STYLE('192,192,192',(#3221));
-structure["SURFACE_SIDE_STYLE"] = ["unknown", "SURFACE_STYLE_FILL_AREA|styles"]
+structure["SURFACE_SIDE_STYLE"] = "unknown", "SURFACE_STYLE_FILL_AREA|styles"
 
 #X = SURFACE_STYLE_FILL_AREA(#357);
-structure["SURFACE_STYLE_FILL_AREA"] = ["FILL_AREA_STYLE|area_style"]
+structure["SURFACE_STYLE_FILL_AREA"] = "FILL_AREA_STYLE|area_style"
 
 #X = FILL_AREA_STYLE('',(#358));
-structure["FILL_AREA_STYLE"] = ["unknown", "FILL_AREA_STYLE_COLOUR|data"]
+structure["FILL_AREA_STYLE"] = "unknown", "FILL_AREA_STYLE_COLOUR|data"
 
 #X = FILL_AREA_STYLE_COLOUR('',#359);
-structure["FILL_AREA_STYLE_COLOUR"] = ["unknown", "COLOUR_RGB|color"]
+structure["FILL_AREA_STYLE_COLOUR"] = "unknown", "COLOUR_RGB|color"
 
 #X = COLOUR_RGB('',0.800000011921,0.800000011921,0.800000011921);
-structure["COLOUR_RGB"] = ["unknown", "red", "green", "blue"]
+structure["COLOUR_RGB"] = "unknown", "red", "green", "blue"
 
 #X = CURVE_STYLE('',#361,POSITIVE_LENGTH_MEASURE(0.1),#359);
-structure["CURVE_STYLE"] = ["unknown","DRAUGHTING_PRE_DEFINED_CURVE_FONT|curve_font", "unknown_func", "COLOUR_RGB|color"]
+structure["CURVE_STYLE"] = "unknown","DRAUGHTING_PRE_DEFINED_CURVE_FONT|curve_font", "unknown_func", "COLOUR_RGB|color"
 
 #X = STYLED_ITEM('',(#77),#73);
-structure["STYLED_ITEM"] = ["unknown1", "PRESENTATION_STYLE_ASSIGNMENT|data", "TRIMMED_CURVE|MANIFOLD_SOLID_BREP|ADVANCED_FACE|object"]
+structure["STYLED_ITEM"] = "unknown1", "PRESENTATION_STYLE_ASSIGNMENT|data", "TRIMMED_CURVE|MANIFOLD_SOLID_BREP|ADVANCED_FACE|object"
 
 #X = DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');
-structure["DRAUGHTING_PRE_DEFINED_CURVE_FONT"] = ["unkown"]
+structure["DRAUGHTING_PRE_DEFINED_CURVE_FONT"] = "unkown",
 
 #X = TRIMMED_CURVE('',#970,(PARAMETER_VALUE(0.0),#967),(PARAMETER_VALUE(1.0),#971),.T.,.PARAMETER.);
-structure["TRIMMED_CURVE"] = ["unknown1", "LINE|line", "func|CARTESIAN_POINT|p1_data", "func|CARTESIAN_POINT|p2_data", "unknown1", "unknown2"]
+structure["TRIMMED_CURVE"] = "unknown1", "LINE|line", "func|CARTESIAN_POINT|p1_data", "func|CARTESIAN_POINT|p2_data", "unknown1", "unknown2"
   
 #X = CYLINDRICAL_SURFACE('',#3893,13.230000000000002);
-structure["CYLINDRICAL_SURFACE"] = ["unknown1", "AXIS2_PLACEMENT_3D|axis2_placement_3d", "unknown"]
+structure["CYLINDRICAL_SURFACE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement_3d", "unknown"
   
 #X = SHAPE_REPRESENTATION_RELATIONSHIP('SRR','None',#2093,#1838);
-structure["SHAPE_REPRESENTATION_RELATIONSHIP"] = ["unknown1", "unknown2", "ADVANCED_BREP_SHAPE_REPRESENTATION|GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION|shape","SHAPE_REPRESENTATION|shape_representation"]
+structure["SHAPE_REPRESENTATION_RELATIONSHIP"] = "unknown1", "unknown2", "ADVANCED_BREP_SHAPE_REPRESENTATION|GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION|shape","SHAPE_REPRESENTATION|shape_representation"
 
 #X = GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION('GBSSR',(#80),#36);
-structure["GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION"] = ["unknown", "GEOMETRIC_SET|geomteric_set", None]
+structure["GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION"] = "unknown", "GEOMETRIC_SET|geomteric_set", None
 
 #X = GEOMETRIC_SET('GEOSET',(#73,#112));
-structure["GEOMETRIC_SET"]= ["unknown","TRIMMED_CURVE|data"]
+structure["GEOMETRIC_SET"]= "unknown","TRIMMED_CURVE|data"
+
+#( BOUNDED_CURVE())
+structure["BOUNDED_CURVE"] = None
+
+#(B_SPLINE_CURVE(2,(#78,#79,#80,#81,#82,#83,#84),.UNSPECIFIED.,.F.,.F.))
+structure["B_SPLINE_CURVE"] = "unknown", "CARTESIAN_POINT|data", "unknown2", "unknow3", "unknown4"
+
+#(CURVE())
+structure["CURVE"] = None
+
+#(GEOMETRIC_REPRESENTATION_ITEM() )
+structure["GEOMETRIC_REPRESENTATION_ITEM"] = None
+
+#RATIONAL_B_SPLINE_CURVE((1.,0.5,1.,0.5,1.,0.5,1.))
+structure["RATIONAL_B_SPLINE_CURVE"] = "float|data",
+
+#(REPRESENTATION_ITEM(''))
+structure["REPRESENTATION_ITEM"] = "str|unknown",
 
 ### DATA PROCESSING ###
 
 def import_data_to_blender():
     
-    global object_name
+    global object_name, object_location
     global vertexs, edges, faces    
                 
     if not object_name:
         object_name = "Unknown Object"
-        
+            
+
     print ("Importing " + object_name)
+    #print (object_location)
             
     me = bpy.data.meshes.new(object_name)    
     ob = bpy.data.objects.new(object_name, me)
@@ -606,9 +722,9 @@ def import_data_to_blender():
     scn.objects.active = ob
     ob.select = True 
 
-    # print (vertexs)
-    # print (edges)
-    # print (faces)
+    print (vertexs)
+    print (edges)
+    print (faces)
     me.from_pydata(vertexs, edges, faces)
 
     me.validate()    
@@ -677,6 +793,8 @@ if __name__ == '__main__':
     test_folder = "/home/jaume/src/mechanical-blender-addons/io_scene_stp/test_files/"
         
     #read_stp(test_folder + "cube.stp")
-    read_stp(test_folder + "SIEM-CONJ-L00025.stp")
-    
+    #read_stp(test_folder + "torus.stp")
+    #read_stp(test_folder + "revolve.stp")
+    #read_stp(test_folder + "SIEM-CONJ-L00025.stp")
+    read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
     
