@@ -1,0 +1,14 @@
+﻿"Symbol";"Value";"Unit";
+"REFERENCE";"6010";"";
+"TraceParts.PartVersion";"1.4.1";"";
+"SUPPLIER";"Schaeffler Technologies AG & Co. KG";"";
+"TraceParts.PartStatus";"Published";"";
+"TraceParts.PartNumber";"69-18092006-823113";"";
+"TraceParts.PartLanguage";"en";"";
+"DESIGN";"Radial ball bearing";"";
+"TraceParts.InstanceId";"69-18092006-823113E6WKQ6PMJMIZKX38QWROA2SWG";"";
+"TraceParts.PartTitle";"Deep groove ball bearings 60, main dimensions to DIN 625-1";"";
+"TRACEPARTS";"TRACEPARTS";"";
+"TraceParts.PartStatusId";"";"";
+"SELECTION";"6010";"";
+"TraceParts.ClassPath";"INAFAG:/F_INAFAG/INAFAG.1.1/INAFAG.1.1.1/INAFAG.1.1.1.1/INAFAG.1.1.1.1.1/INAFAG.1.1.1.1.1.1/69-18092006-823113";"";
