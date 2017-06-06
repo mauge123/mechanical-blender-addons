@@ -28,6 +28,8 @@ blender --python stp_utils.py -- file1.stl file2.stl file3.stl ...
 
 import re
 import bpy
+import numpy as np
+import math
 
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
@@ -107,13 +109,17 @@ def check_instance_value(instance, value, n_exp):
             None
         elif "float" in n_exp:
             value = float(value)
+        elif "int" in n_exp:
+            value = int(value)
         elif "str" in n_exp:
             if value[0] == "'" and value[-1] == "'":
                 value = value[1:-1]
             else:
                 print ("Expected 'string'")
+        elif value == "*":
+            None
         else:
-            print ("Error: Expected instance")
+            print ("Error: Expected instance: " + value + " on " + instance["name"])
     
     return value
    
@@ -128,7 +134,7 @@ def load_instance(instance, parent = None):
                     break
         
         if st and not isinstance(st,tuple):
-            print("ERROR")
+            print("ERROR, expecting tuple st " + instance["name"])
             return instance
         
         if not instance["data"]:                    
@@ -163,6 +169,7 @@ def load_instance(instance, parent = None):
                             instance["data"][n] = check_instance_value(instance, param, n_exp)
                         
             execute_instance_functions(instance,"first_load")
+            execute_instance_functions(instance,"load")
         else: 
             #Already loaded
             execute_instance_functions(instance,"load")
@@ -192,6 +199,11 @@ def get_instance_value(instance,path, index=0):
 
 # Debug function
 def print_instance(instance, max_levels=-1, name = "", level =0):
+    
+    if level==0:
+        for ins in instances:
+            ins["printed"] = False
+    
     global print_verbose_level
     
     if max_levels > -1 and level > max_levels:
@@ -201,6 +213,13 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
     for i in range(level):
         spaces=spaces+"|"
     print (spaces + name + instance["number"] + " " + instance["name"])
+    
+    if instance["printed"]:
+        print (spaces + "recursive_call")
+        return
+        
+    instance["printed"] = True
+    
     
     if instance["name"] in structure_params and "print_verbose" in structure_params[instance["name"]]:
         pv = structure_params[instance["name"]]["print_verbose"]
@@ -224,6 +243,12 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
                     print_instance(value2, max_levels, name + "["+str(idx)+"]:", level+1)
         else:
             print_instance(value, max_levels, name + ":", level+1)
+            
+def get_instance_path (instance):
+    str = instance["number"] + " " + instance["name"]
+    if "parent" in instance and instance["parent"]:
+        str = str + ">" + get_instance_path(instance["parent"])
+    return str
 
 ### HEADER ###
 
@@ -392,6 +417,60 @@ def get_edge_loop_verts(edge_loop):
     return verts
 
 
+def get_matrix_from_axis2_placement_3d(instance):
+    dir1 = np.array(get_instance_value(instance,["dir1","values"]))
+    dir2 = np.array(get_instance_value(instance,["dir2","values"]))
+    co = np.array(get_instance_value(instance,["point","coordinates"]))
+    
+    dir3 = np.cross(dir1,dir2)
+    
+    return [np.append(dir3,0), np.append(dir2,0), np.append(dir1,0), np.append(co,1.0)]
+
+def rotation_matrix (angle):
+    return [[math.cos(angle), -math.sin(angle), 0, 0], [math.sin(angle), math.cos(angle), 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    
+def generate_torus_faces (instance, face):
+    if instance["name"] != "TOROIDAL_SURFACE":
+        return
+    
+    iv = len(vertexs)
+    r1 = get_instance_value(instance,"r1")
+    r2 = get_instance_value(instance,"r2")
+    pm = get_matrix_from_axis2_placement_3d(get_instance_value(instance,"axis2_placement3d"))
+    prec = 32
+    for i in range(0,prec):
+        a1 = ((math.pi*2)/prec)*i
+        tm = [[1.0, 0.0, 0.0, 0.0],[0.0, 1.0, 0.0, 0.0],[0.0, 0.0, 1.0, 0.0],[r1, 0.0, 0.0, 1.0]]
+        rm = rotation_matrix(a1)
+        rm = np.matmul(rm, pm)
+        tm = np.matmul(tm, rm)
+        for j in range (0,prec):
+            a2 = ((math.pi*2)/prec)*j
+            v4 = [math.cos(a2)*r2,0.0, math.sin(a2)*r2, 1.0]
+            v4 = np.matmul(v4,tm)
+            v3 = [0,0,0]
+            for k in range(0,3):
+                v3[k] = v4[k]
+                 
+            vertexs.append(v3)
+
+            if j==31:
+                edges.append([iv+i*32+j,iv+i*32+1])
+                if i==31:
+                    faces.append([iv+i*32+j,iv+j,iv,iv+i*32])
+                else:
+                    faces.append([iv+i*32+j,iv+(i+1)*32+j,iv+(i+1)*32,iv+i*32])
+            else:
+                edges.append([iv+i*32+j,iv+i*32+j+1])
+                if i==31:
+                    edges.append([iv+i*32+j,iv+j])
+                    faces.append([iv+i*32+j,iv+j,iv+j+1,iv+i*32+j+1])
+                else:
+                    edges.append([iv+i*32+j,iv+(i+1)*32+j])
+                    faces.append([iv+i*32+j,iv+(i+1)*32+j,iv+(i+1)*32+j+1,iv+i*32+j+1])
+          
+def generate_cilinder_faces(instance, face):          
+    None
 
 ### INSTANCE STRUCTURES ####
 
@@ -447,13 +526,18 @@ structure["EDGE_CURVE"] = "unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SUR
 structure_func["EDGE_CURVE"] = {"first_load" : set_edge }
 
 #X = CIRCLE('',#3900,13.230000000000002);
-structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2"
+structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|AXIS2_PLACEMENT_2D|placement", "unknown2"
 
 #X= ELLIPSE('',#539,7.296415549894075,5.053)
 structure["ELLIPSE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "r1", "r2"
 
 #X = SURFACE_CURVE('',#27,(#31,#43),.PCURVE_S1.)
+def surface_curve_load(instance):
+    None
+    #print (get_instance_path(instance))
+
 structure["SURFACE_CURVE"] = "unknown", "LINE|CIRCLE|object", "PCURVE|data", "unknown2"
+structure_func["SURFACE_CURVE"] = { "load" : surface_curve_load }
 
 #X = SPHERICAL_SURFACE('',#387,4.25);
 structure["SPHERICAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|radi"
@@ -474,10 +558,19 @@ t= "unknown", "unknown2", "CARTESIAN_POINT|data", "unknown3", "unknown4", "unkow
 structure ["B_SPLINE_CURVE_WITH_KNOTS"].append(t)
 
 #X = PCURVE('',#32,#37);
-structure["PCURVE"] = "unknown","PLANE|SURFACE_OF_REVOLUTION|object","DEFINITIONAL_REPRESENTATION|def_representation"
+structure["PCURVE"] = "unknown","PLANE|SURFACE_OF_REVOLUTION|CYLINDRICAL_SURFACE|object","DEFINITIONAL_REPRESENTATION|def_representation"
 
 #X = SEAM_CURVE('',#27,(#32,#48),.PCURVE_S1.);
-structure["SEAM_CURVE"] = "unknown", "CIRCLE|circle", "PCURVE|data", "unknown2"
+def seam_curve_load(instance):
+    #Assing to object to retrieve information 
+    #print_instance(instance)
+    pcurves = get_instance_value(instance, "pcurve")
+    for pcurve in pcurves:
+        obj = get_instance_value(pcurve,"object")
+        obj["data"]["seam_curve"] = instance
+     
+structure["SEAM_CURVE"] = "unknown", "CIRCLE|LINE|circle", "PCURVE|pcurve", "unknown2"
+structure_func["SEAM_CURVE"] = {"first_load" : seam_curve_load }
 
 #X = SURFACE_OF_REVOLUTION('',#34,#39);
 structure["SURFACE_OF_REVOLUTION"] = "unknown", "CIRCLE|circle", "AXIS1_PLACEMENT|axis"
@@ -516,19 +609,28 @@ def set_faces (instance):
                     if (fb["name"] == "FACE_BOUND"):
                         oedges = get_instance_value(fb, ["loop","oriented_edges"])
                         if oedges:
+                            loop = False
                             for oe in oedges:
-                                v1 = get_instance_value(oe, ["edge_curve", "v1","vertex_id"])
-                                v2 = get_instance_value(oe, ["edge_curve", "v2", "vertex_id"])
-                                edges.append([v1,v2])
-                                    
-                            faces.append(get_edge_loop_verts(get_instance_value(fb, ["loop"])))
+                                edge_curve = get_instance_value(oe, "edge_curve")
+                                surf = get_instance_value(edge_curve,"object")
+                                object = get_instance_value(surf,"object")
+                                if object and object["name"] == "CIRCLE": 
+                                    print ("A Circle")
+                                elif object and object["name"] == "LINE":
+                                    loop = True
+                                elif object:
+                                    print("unknown " + object["name"])
+                            if loop:
+                                faces.append(get_edge_loop_verts(get_instance_value(fb, ["loop"])))
                     elif (fb["name"] == "FACE_OUTER_BOUND"):
                         None
                         #faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
                     else:
                         print ("Unknown instance "  + fb["name"])
             elif obj["name"] == "TOROIDAL_SURFACE":
-                None
+                generate_torus_faces(obj, face)
+            elif obj["name"] == "CYLINDRICAL_SURFACE":
+                generate_cilinder_faces(obj, face)
             else:
                 print ("Unknow definition " + obj["name"])
         else:
@@ -538,12 +640,17 @@ structure["MANIFOLD_SOLID_BREP"] = "unknown", "CLOSED_SHELL|closed_shell"
 structure_func["MANIFOLD_SOLID_BREP"] = {"first_load" : set_faces}
 
 #X = DIRECTION('',(1.,0.,-0.));
-structure["DIRECTION"] = "unknown", "values"
+structure["DIRECTION"] = "unknown", "float|values"
 structure_params["DIRECTION"] = {"print_verbose" : 2}
 
 #X = CARTESIAN_POINT('',(0.,0.,0.));
+#X = CARTESIAN_POINT('',(0.,0.));
+def cartesian_point_load(instance):
+    None
+    
 structure["CARTESIAN_POINT"] = "unknown", "float|coordinates"
 structure_params["CARTESIAN_POINT"] = {"print_verbose" : 2}
+structure_func["CARTESIAN_POINT"] = {"load" : cartesian_point_load}
 
 #X = AXIS1_PLACEMENT('',#40,#41);
 structure["AXIS1_PLACEMENT"] = "name", "CARTESIAN_POINT|point", "DIRECTION|dir"
@@ -551,6 +658,10 @@ structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
 
 #X = AXIS2_PLACEMENT_3D('',#12,#13,#14);
 structure["AXIS2_PLACEMENT_3D"] = "name", "CARTESIAN_POINT|point", "DIRECTION|dir1", "DIRECTION|dir2"
+structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
+
+#X = AXIS2_PLACEMENT_2D('',#51,#52);
+structure["AXIS2_PLACEMENT_2D"] = "str|unknown", "CARTESIAN_POINT|point", "DIRECTION|dir"
 structure_params["AXIS2_PLACEMENT_3D"] = {"print_verbose" : 1}
 
 #X = APPLICATION_CONTEXT('core data for automotive mechanical design processes');
@@ -612,7 +723,7 @@ def import_shape(instance):
     
     import_data_to_blender()
 
-structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", None
+structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", "multiple|unknown2"
 structure_func["ADVANCED_BREP_SHAPE_REPRESENTATION"] = {"init" : init_object, "first_load" : import_shape }
 
 #X = SHAPE_REPRESENTATION('',(#37,#977,#1751,#3984),#36);
@@ -620,8 +731,9 @@ def set_shape_name(instance):
     definition = get_instance_value(instance, "shape_definition_representation")
     if definition:
         set_product_name(get_instance_value(definition,["product_definition_shape", "product_definition", "formation", "product"]))
+                    
 
-structure["SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|data", None
+structure["SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|data", "multiple|unknown2"
 structure_func["SHAPE_REPRESENTATION"] = {"load" : set_shape_name }
 
 #X = SHAPE_DEFINITION_REPRESENTATION(#4,#10);
@@ -635,10 +747,10 @@ structure["SHAPE_DEFINITION_REPRESENTATION"] = "PRODUCT_DEFINITION_SHAPE|product
 structure_func["SHAPE_DEFINITION_REPRESENTATION"] = {"first_load" : set_shape_representation_parent}
 
 #X = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#78,#887,#1748,#2092,#2394,#2684,#2685,#3225,#3226,#3227,#3228,#3969),#67);
-structure["MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"] = ["unknown1", "STYLED_ITEM|data", None]
+structure["MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION"] = "unknown1", "STYLED_ITEM|data", "multiple|unknown2"
 
 #X = PRESENTATION_STYLE_ASSIGNMENT((#76));
-structure["PRESENTATION_STYLE_ASSIGNMENT"] = ["SURFACE_STYLE_USAGE|CURVE_STYLE|styles"]
+structure["PRESENTATION_STYLE_ASSIGNMENT"] = "SURFACE_STYLE_USAGE|CURVE_STYLE|styles"
 
 #X= SURFACE_STYLE_USAGE(.BOTH.,#355);
 structure["SURFACE_STYLE_USAGE"] = "unknown", "SURFACE_SIDE_STYLE|side_style"
@@ -672,16 +784,53 @@ structure["DRAUGHTING_PRE_DEFINED_CURVE_FONT"] = "unkown",
 structure["TRIMMED_CURVE"] = "unknown1", "LINE|line", "func|CARTESIAN_POINT|p1_data", "func|CARTESIAN_POINT|p2_data", "unknown1", "unknown2"
   
 #X = CYLINDRICAL_SURFACE('',#3893,13.230000000000002);
-structure["CYLINDRICAL_SURFACE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement_3d", "unknown"
+structure["CYLINDRICAL_SURFACE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement_3d", "float|radi"
   
 #X = SHAPE_REPRESENTATION_RELATIONSHIP('SRR','None',#2093,#1838);
 structure["SHAPE_REPRESENTATION_RELATIONSHIP"] = "unknown1", "unknown2", "ADVANCED_BREP_SHAPE_REPRESENTATION|GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION|shape","SHAPE_REPRESENTATION|shape_representation"
 
 #X = GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION('GBSSR',(#80),#36);
-structure["GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION"] = "unknown", "GEOMETRIC_SET|geomteric_set", None
+structure["GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION"] = "unknown", "GEOMETRIC_SET|geomteric_set", "multiple|unknown2"
 
 #X = GEOMETRIC_SET('GEOSET',(#73,#112));
 structure["GEOMETRIC_SET"]= "unknown","TRIMMED_CURVE|data"
+
+#( GEOMETRIC_REPRESENTATION_CONTEXT (3))
+structure["GEOMETRIC_REPRESENTATION_CONTEXT"]= "int|unknown",
+
+#( GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#31)) )
+structure["GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT"] = "UNCERTAINTY_MEASURE_WITH_UNIT|mesure",
+
+# ( GLOBAL_UNIT_ASSIGNED_CONTEXT((#28,#29,#30)) )
+structure["GLOBAL_UNIT_ASSIGNED_CONTEXT"] = "multiple|unit_data",
+
+#X = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#28,'distance_accuracy_value','confusion accuracy');
+structure["UNCERTAINTY_MEASURE_WITH_UNIT"] = "func|leng_measure", "multiple|units", "str|unknown1", "str|unknown2"
+
+#( LENGTH_UNIT())
+structure["LENGTH_UNIT"] =  None
+
+# (PLANE_ANGLE_UNIT() )
+structure["PLANE_ANGLE_UNIT"] = None
+
+# (SOLID_ANGLE_UNIT() )
+structure["SOLID_ANGLE_UNIT"] = None
+
+#( CONVERSION_BASED_UNIT('MILLIMETRE',#178) )
+structure["CONVERSION_BASED_UNIT"] = "str|unit", "LENGTH_MEASURE_WITH_UNIT|lengh_mesure"
+
+#181 = DIMENSIONAL_EXPONENTS(1.0,0.0,0.0,0.0,0.0,0.0,0.0);
+structure["DIMENSIONAL_EXPONENTS"] = "float|a1", "float|a2", "float|a3", "float|a4", "float|a5", "float|a6", "float|a7"
+
+#178=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.0),#334);
+structure["LENGTH_MEASURE_WITH_UNIT"] = "func|length", "multiple|units"
+
+#( NAMED_UNIT(*) )
+#( NAMED_UNIT(#181) )
+structure["NAMED_UNIT"] = "DIMENSIONAL_EXPONENTS|unknown",
+
+#(SI_UNIT(.MILLI.,.METRE.))
+structure["SI_UNIT"] = "scale", "unit"
 
 #( BOUNDED_CURVE())
 structure["BOUNDED_CURVE"] = None
@@ -700,6 +849,9 @@ structure["RATIONAL_B_SPLINE_CURVE"] = "float|data",
 
 #(REPRESENTATION_ITEM(''))
 structure["REPRESENTATION_ITEM"] = "str|unknown",
+
+#( REPRESENTATION_CONTEXT('Context #1','3D Context with UNIT and UNCERTAINTY') )
+structure["REPRESENTATION_CONTEXT"] = "str|name", "str|desc"
 
 ### DATA PROCESSING ###
 
@@ -722,9 +874,9 @@ def import_data_to_blender():
     scn.objects.active = ob
     ob.select = True 
 
-    print (vertexs)
-    print (edges)
-    print (faces)
+    #print (vertexs)
+    #print (edges)
+    #print (faces)
     me.from_pydata(vertexs, edges, faces)
 
     me.validate()    
@@ -795,6 +947,7 @@ if __name__ == '__main__':
     #read_stp(test_folder + "cube.stp")
     #read_stp(test_folder + "torus.stp")
     #read_stp(test_folder + "revolve.stp")
+    read_stp(test_folder + "cylinder.stp")
     #read_stp(test_folder + "SIEM-CONJ-L00025.stp")
-    read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
+    #read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
     
