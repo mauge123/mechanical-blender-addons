@@ -49,6 +49,56 @@ faces = [] # Mesh Faces
 
 print_verbose_level = 10
 
+### UTILS ####
+
+def p3_p3_dist (a,b):
+    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
+
+def v3_len(a):
+    return math.sqrt (a[0]**2 + a[1]**2 + a[2]**2) 
+
+def sub_v3_v3(a,b):
+    return [a[0]-b[0], a[1]-b[1], a[2]-b[2]] 
+
+def add_v3_v3(a,b):
+    return [a[0]+b[0], a[1]+b[1], a[2]+b[2]] 
+
+def v3_from_p3_p3 (a,b):
+    return [b[0]-a[0], b[1]-a[1], b[2]-a[2]]
+
+def is_parallel_v3 (a,b):
+    return math.fabs(np.dot(a,b)) == v3_len(a)*v3_len(b)
+
+def normalize_v3 (a):
+    return a / v3_len(a)
+
+def eq_v3 (a,b):
+    return a[0]==b[0] and a[1]==b[1] and a[2]==b[2]
+
+# Cosine Theorem
+def a_from_b_c_A (b, c, A):
+    return math.sqrt(b**2 + c**2 - 2*b*c*math.cos(A))
+
+# l is length of vectors
+def angle_v3_v3 (a, b):
+    return math.acos(np.dot(normalize_v3(a),normalize_v3(b))) 
+
+def sin_cos_angle_v3_v3 (a,b):
+    au = normalize_v3(a)
+    bu = normalize_v3(b)
+    cos = np.dot(au,bu)
+    sin = math.sqrt(1-cos**2)
+    
+    if sin > 0:
+        #correct sign
+        #given the sign on of cos of a 90 degrees rotated vector
+        a90  = np.dot (rotation_matrix_axis(np.cross (au,bu), math.pi /2), au)
+        cos2 = np.dot(a90,bu)
+        if cos2 < 0:
+            sin = -sin
+        
+    return sin, cos 
+
 ### COMMON FUNCTION ###
 
 def read_stp_single_line(f):
@@ -94,8 +144,8 @@ def execute_instance_functions(instance, type):
             else:
                 func(instance)
                 
-def load_referenced_instance(instance, number, n_exp):
-    new_instance = load_instance(get_instance(number),instance)
+def load_referenced_instance(instance, number, n_exp, var_name):
+    new_instance = load_instance(get_instance(number),instance, var_name)
     if len(n_exp) and not new_instance["name"] in n_exp:
         if not "multiple" in new_instance and not "multiple" in n_exp:
             print ("Error: Not expected " + new_instance["name"] + " in " +  instance["number"] + " " + instance ["name"])
@@ -109,6 +159,8 @@ def check_instance_value(instance, value, n_exp):
             None
         elif "float" in n_exp:
             value = float(value)
+            #load with 0.001 prec
+            value  = int(value*1000) / 1000.0
         elif "int" in n_exp:
             value = int(value)
         elif "str" in n_exp:
@@ -122,8 +174,37 @@ def check_instance_value(instance, value, n_exp):
             print ("Error: Expected instance: " + value + " on " + instance["name"])
     
     return value
+
+def fill_instance_data(instance, st):
+    if not st:
+        return    
+    
+    if not (len(st) == len(instance["params"])):
+        print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"] + ". IGNORED")
+        return instance
+    for idx,n  in enumerate(st):
+        if n:
+            n_exp = n.split("|")
+            n = n_exp.pop()  #last postion is the data name
+            param = instance["params"][idx]
+
+            if isinstance(param, list):
+                instance["data"][n] = []
+                c = 0
+                for a in instance["params"][idx]:
+                    c = c +1
+                    if a[0] == '#':
+                        instance["data"][n].append(load_referenced_instance(instance,a, n_exp, n + "["+str(c)+"]"))
+                    else:
+                        instance["data"][n].append(check_instance_value(instance, a, n_exp))
+                
+            elif param[0] == '#':
+                instance["data"][n] = load_referenced_instance(instance, param, n_exp, n)
+            else:
+                instance["data"][n] = check_instance_value(instance, param, n_exp)
+
    
-def load_instance(instance, parent = None):
+def load_instance(instance, parent = None, var_name = None):
     
     if instance["name"] in structure:
         st = structure[instance["name"]] 
@@ -140,39 +221,39 @@ def load_instance(instance, parent = None):
         if not instance["data"]:                    
             instance["data"] = {}
             
-            instance["parent"] = parent
-            
+            if parent:
+                instance["parent"] = {"instance" : parent, "var_name" : var_name}
+            else:
+                instance["parent"] = None
+                
             execute_instance_functions(instance,"init")
             
-            if st:
-                
-                if not (len(st) == len(instance["params"])):
-                    print ("Diferent number of parameters in " + instance["number"]+" " +instance["name"] + ". IGNORED")
-                    return instance
-                for idx,n  in enumerate(st):
-                    if n:
-                        n_exp = n.split("|")
-                        n = n_exp.pop()  #last postion is the data name
-                        param = instance["params"][idx]
-
-                        if isinstance(param, list):
-                            instance["data"][n] = []
-                            for a in instance["params"][idx]:
-                                if a[0] == '#':
-                                    instance["data"][n].append(load_referenced_instance(instance,a, n_exp))
-                                else:
-                                    instance["data"][n].append(check_instance_value(instance, a, n_exp))
+            fill_instance_data(instance, st)
                                     
-                        elif param[0] == '#':
-                            instance["data"][n] = load_referenced_instance(instance, param, n_exp)
-                        else:
-                            instance["data"][n] = check_instance_value(instance, param, n_exp)
-                        
             execute_instance_functions(instance,"first_load")
             execute_instance_functions(instance,"load")
-        else: 
+        else:
+            if (parent):
+                                
+                #object was loaded from another side
+                if not isinstance(instance["parent"],list):
+                    instance["parent"] = [instance["parent"]]
+                    
+                
+                is_new = True
+                for child in instance["parent"]:
+                    if child["instance"] == parent and child["var_name"] == var_name:
+                        is_new = False
+                        break
+                
+                if is_new:
+                    instance["parent"].append({"instance" : parent, "var_name" : var_name})
+                    #Debug and analisis, fill parent data on nexts objects
+                    fill_instance_data(instance, st)
+                
             #Already loaded
             execute_instance_functions(instance,"load")
+            
     elif "multiple" in instance:
         for sub_instance in instance["multiple"]:
             load_instance(sub_instance,parent)
@@ -243,12 +324,52 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
                     print_instance(value2, max_levels, name + "["+str(idx)+"]:", level+1)
         else:
             print_instance(value, max_levels, name + ":", level+1)
+    
+    instance["printed"] = False
             
-def get_instance_path (instance):
-    str = instance["number"] + " " + instance["name"]
+def get_instance_path (instance, level=0):
+    path = instance["number"] + " " + instance["name"]
     if "parent" in instance and instance["parent"]:
-        str = str + ">" + get_instance_path(instance["parent"])
-    return str
+        if isinstance(instance["parent"],list):
+            # multiple parents
+            level = level +1
+            for child in instance["parent"]:
+                path = path + "\n" + str(level) + ")" + get_instance_path(child["instance"],level)
+        else:
+            path = path + ">" + get_instance_path(instance["parent"]["instance"], level)
+    return path
+
+def print_instance_tree (instance, level=0, var_name = ""):
+    spaces = ""
+    i=0
+    while i < level:
+        spaces = spaces + " "
+        i = i + 1
+        
+    if var_name:
+        var_name = "=> " + var_name
+    
+    print (spaces +instance["number"] + " " + instance["name"] + var_name)
+    if "parent" in instance and instance["parent"]:
+        if isinstance(instance["parent"],list):
+            level = level +1
+            for child in instance["parent"]:
+                print_instance_tree (child["instance"],level, child["var_name"])
+        else:
+            print_instance_tree(instance["parent"]["instance"], level, instance["parent"]["var_name"])
+    else:
+        print ("")
+
+# Recursive func to get a parent instance, by name 
+def get_parent_instance(instance, name):
+    found = None
+    if instance["name"]:
+        found = instance
+    elif instance["parent"]:
+        found = get_instance_parent(instance, name)
+    
+    return found
+         
 
 ### HEADER ###
 
@@ -373,15 +494,10 @@ def parse_params(str, params):
 ### INSTANCE UTILS ###
 
 # Retuns verts of an edge loop
-def get_edge_loop_verts(edge_loop):
-    edges = []
+def get_ordered_verts_from_edges(edges):
+    
     verts = []
     
-    for ed in get_instance_value(edge_loop,["oriented_edges"]):
-        edges.append([
-            get_instance_value(ed, ["edge_curve","v1","vertex_id"]),
-            get_instance_value(ed, ["edge_curve","v2","vertex_id"])
-        ])
                 
     ordered_edges = []
     ordered_edges.append(edges[0])
@@ -417,6 +533,9 @@ def get_edge_loop_verts(edge_loop):
     return verts
 
 
+def get_plane_from_axis2_placement_3d(instance):
+    return np.array(get_instance_value(instance,["dir1","values"]))
+    
 def get_matrix_from_axis2_placement_3d(instance):
     dir1 = np.array(get_instance_value(instance,["dir1","values"]))
     dir2 = np.array(get_instance_value(instance,["dir2","values"]))
@@ -426,9 +545,41 @@ def get_matrix_from_axis2_placement_3d(instance):
     
     return [np.append(dir3,0), np.append(dir2,0), np.append(dir1,0), np.append(co,1.0)]
 
-def rotation_matrix (angle):
-    return [[math.cos(angle), -math.sin(angle), 0, 0], [math.sin(angle), math.cos(angle), 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+def get_matrix3_from_axis2_placement_3d(instance):
+    dir1 = np.array(get_instance_value(instance,["dir1","values"]))
+    dir2 = np.array(get_instance_value(instance,["dir2","values"]))
+    co = np.array(get_instance_value(instance,["point","coordinates"]))
     
+    dir3 = np.cross(dir1,dir2)
+    
+    return [dir3, dir2, dir1]
+
+def rotation_matrix (angle, dim=4):
+    return rotation_matrix_sin_cos (math.sin(angle), math.sin(cos), dim)
+    
+def rotation_matrix_sin_cos (sin, cos, dim=4):
+    if dim == 4:
+        return [[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    if dim == 3:
+        return [[cos, -sin, 0], [sin, cos, 0], [0, 0, 1]]
+    
+    
+def rotation_matrix_axis(axis, theta):
+    """
+    Return the rotation matrix associated with counterclockwise rotation about
+    the given axis by theta radians.
+    """
+    axis = np.asarray(axis)
+    axis = axis/math.sqrt(np.dot(axis, axis))
+    a = math.cos(theta/2.0)
+    b, c, d = -axis*math.sin(theta/2.0)
+    aa, bb, cc, dd = a*a, b*b, c*c, d*d
+    bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
+    return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
+                     [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
+                     [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
+                     
+        
 def generate_torus_faces (instance, face):
     if instance["name"] != "TOROIDAL_SURFACE":
         return
@@ -470,8 +621,369 @@ def generate_torus_faces (instance, face):
                     faces.append([iv+i*32+j,iv+(i+1)*32+j,iv+(i+1)*32+j+1,iv+i*32+j+1])
           
 def generate_cilinder_faces(instance, face):          
-    None
+    if not instance["name"] == "FACE_BOUND":
+        return
+    
+    
+    oedges = get_instance_value(instance, ["loop","oriented_edges"])
+    if oedges:
+        loop = False
+        for oe in oedges:
+            edge_curve = get_instance_value(oe, "edge_curve")
+            surf = get_instance_value(edge_curve,"object")
+            object = get_instance_value(surf,"object")
+            print_instance(surf,1)
+            if object and object["name" ] == "CIRCLE": 
+                generate_circle_face(object)
+            elif object and object["name"] == "LINE":
+                loop = True
+            elif object:
+                print("unknown " + object["name"])
+        if loop:
+            faces.append(get_edge_loop_verts(get_instance_value(instance, ["loop"])))
+    
+    
+def generate_circle_face (instance):
+    if instance["name"] != "CIRCLE":
+        return 
+    
+    #print_instance_tree(instance)
+    #print (get_instance_path(instance))
+    
+    r = get_instance_value(instance,"radi")
+    pm = get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement"))
+    prec = 32
+    iv = len(vertexs)
+    for i in range(0,prec):
+        a = ((math.pi*2)/prec)*i
+        v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
+        v4 = np.matmul(v4,pm)
+        v3 = [0,0,0]
+        for k in range(0,3):
+            v3[k] = v4[k]
+                 
+        vertexs.append(v3)
+        if i== 31:
+            edges.append([iv+i,iv])
+        else:
+            edges.append([iv+i,iv+i+1])
+        
+    faces.append(range(iv,iv+32))
+    
+    
+def get_arc_verts (instance, p1, p2):    
+    verts = []
+    
+    if instance["name"] != "CIRCLE":
+        return
+    
+    r = get_instance_value(instance,"radi")
+    center = get_instance_value(instance, ["placement", "point", "coordinates"])
 
+    if p3_p3_dist (center,p1) - r > 0.01:
+        print ("Invalid p1:")
+        
+    if p3_p3_dist (center,p2) - r > 0.01:
+        print ("Invalid p1")
+        
+    # Plane check?
+    
+    pm = get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement"))
+    
+    prec = 32
+    
+    
+    l = a_from_b_c_A (r,r,(math.pi*2)/prec)
+
+    sign = -1
+    
+    #find first point
+    s = 1
+    for i in range(0,prec):
+        a = ((math.pi*2)/prec)*i * sign
+        v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
+        v4 = np.matmul(v4,pm)
+        v3 = [0,0,0]
+        for k in range(0,3):
+            v3[k] = v4[k]
+            
+        if p3_p3_dist (v3,p1) <= l:
+            s = i+1
+            break
+        
+    verts.append(p1)
+
+    for i in range(0,prec):
+
+        a = ((math.pi*2)/prec)*(i+s) *sign
+
+        v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
+        v4 = np.matmul(v4,pm)
+        v3 = [0,0,0]
+        for k in range(0,3):
+            v3[k] = v4[k]
+        
+        if p3_p3_dist (v3,p2) <= l:    
+            verts.append(p2)
+            break
+        else:
+            # Last Point
+            verts.append(v3)
+            
+    return verts
+            
+def generate_edges (verts):
+    iv = len(vertexs)
+    i=0
+    l = len(verts)-1
+    for v in verts:
+        vertexs.append(v)
+        if i<l:
+            edges.append([iv+i,iv+i+1])
+            
+        i=i+1     
+
+def generate_arc (instance, p1, p2):
+    verts = get_arc_verts(instance, p1, p2)
+    generate_edges(verts)
+        
+
+def order_segments (segments):
+    new_segments = []
+    new_segments.append(segments[0])
+    segments.remove(segments[0])
+    ok = True
+    while len(segments) and ok:
+        ok = False
+        i=0
+        for seg in segments:
+            if (seg["verts"][0] == new_segments[-1]["verts"][-1]):
+                new_segments.append(seg)
+                #segments.remove(seg)
+                del segments[i]
+                ok = True
+                break
+            if (seg["verts"][-1] == new_segments[-1]["verts"][-1]):
+                seg["verts"] = list(reversed(seg["verts"]))
+                seg["sign"] = seg["sign"] * -1
+                new_segments.append(seg)
+                #segments.remove(seg)
+                del segments[i]
+                ok = True
+                break
+            i=i+1
+            
+    if (not ok):
+        print ("Incorrect loop")
+    elif (new_segments[0]["verts"][0] != new_segments[-1]["verts"][-1]):
+        print ("Not closed loop")
+    
+    return new_segments
+
+def get_segments(data, gen_edges = False):
+    segments = []
+    
+    #first node
+    append_to_segment (segments, data[0]["surf"],  data[0]["edge_curve"] )
+    
+    i=1
+    while i<len(data): 
+        if not continue_segment(segments, data[i]["surf"], data[i]["edge_curve"]):
+            append_to_segment (segments, data[i]["surf"],  data[i]["edge_curve"])
+                
+        i=i+1
+    
+    if gen_edges:
+        for i in range(0, len(segments)):
+           generate_edges(segments[i]["verts"])
+            
+    return order_segments(segments)
+
+
+def generate_planar_faces_from_outbound (instance, data, surf):
+    segments = get_segments (data, True)
+    if surf["name"] == "CIRCLE":
+        if len(segments) == 1 and segments[0]["name"] == "CIRCLE":
+            r1 = get_instance_value(surf,"radi")
+            tm = get_matrix_from_axis2_placement_3d(get_instance_value(surf,"placement"))
+            print ("check tm of both objects")
+            r2 = segments[0]["radi"]
+            print ("Ring of" , r1, r2)
+        else:
+            print ("Not perfomed")
+    else:
+        print ("Unknown planar surface to apply face bound")
+    
+def generate_cylindrical_faces_from_outbound (instance, data):
+    #return 
+    global faces, edges, vertexs
+    
+    segments = get_segments(data)
+    
+    if len(segments) != 4:
+        print ("Expected 4 segments")
+        return
+    
+    if segments[0]["name"] != "CIRCLE":
+        #start on a circle
+        seg = segments[0]
+        segments.remove(seg)
+        segments.append(seg)
+        
+    if segments[0]["name"] == "CIRCLE" and segments[1]["name"] == "LINE":
+        # Get rotation matrix and calc vertices!
+        i=0
+        iv = len(vertexs)
+        h = sub_v3_v3 (segments[1]["verts"][1],segments[1]["verts"][0])
+        im=len(segments[0]["verts"])
+        for i in range(0,im):
+            a = segments[0]["verts"][i]
+            b = add_v3_v3 (a, h)
+            
+            vertexs.append(a)
+            vertexs.append(b)
+        
+            if i==im-1:
+                None
+            else:
+               faces.append ([iv+i*2, iv+i*2+1, iv+i*2+3,iv+i*2+2]) 
+        
+    else:
+        print ("expected circle and line")
+    
+    
+    
+    
+def append_to_segment(segments, surf, edge_curve):
+    if surf["name"] == "CIRCLE":
+        segments.append ({
+                            "name" : surf["name"],
+                            "radi": get_instance_value(surf, "radi"), 
+                            "verts" : get_arc_verts(
+                                surf,
+                                get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
+                                get_instance_value(edge_curve, ["v2","cartesian_point","coordinates"])
+                            ),
+                            "center" : get_instance_value(surf, ["placement", "point","coordinates"]),
+                            "plane" : list(get_plane_from_axis2_placement_3d(get_instance_value(surf,"placement"))),
+                            "pm" : get_matrix3_from_axis2_placement_3d(get_instance_value(surf,"placement")),
+                            "tm" : get_matrix_from_axis2_placement_3d(get_instance_value(surf,"placement")),
+                            "sign" : 1
+                        })
+    elif surf["name"] == "LINE":
+        segments.append ({
+                            "name" : surf["name"],
+                            "verts" : [
+                                get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
+                                get_instance_value(edge_curve, ["v2","cartesian_point","coordinates"])
+                            ],
+                            "sign" : 1
+                        })
+    else:
+        print ("unexpected for segment", surf["name"])
+                    
+
+def continue_segment (segments, surf, edge_curve):
+    prv = segments[-1]
+    if surf["name"] == prv["name"] == "CIRCLE":
+        if prv["radi"] == get_instance_value(surf, "radi") and prv["center"] == get_instance_value(surf, ["placement", "point","coordinates"]):
+            #continue
+            v = get_arc_verts(
+                surf,
+                get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
+                get_instance_value(edge_curve, ["v2","cartesian_point","coordinates"])
+            )
+            
+            #print (prv["verts"][0],prv["verts"][-1], v[0], v[-1])
+            if eq_v3 (prv["verts"][-1], v[0]):
+                prv["verts"] = prv["verts"] + v[1:]
+            elif eq_v3 (prv["verts"][0], v[-1]):
+                prv["verts"] =  list(reversed(prv["verts"])) + list(reversed(v))[1:] 
+                prv["sign"] = prv["sign"] * -1
+            elif eq_v3 (prv["verts"][0], v[0]):
+                prv["verts"] =  list(reversed(prv["verts"])) + v[1:]
+                prv["sign"] = prv["sign"] * -1
+            else:
+                print ("Error") 
+            
+            return True
+        else:
+            return False
+    else:
+        return False
+
+
+    
+#asumes 4 closed edges            
+def generate_torus_from_outbound (instance, data):
+    #return
+    global faces, edges, vertexs
+    
+    r1 = get_instance_value(instance,"r1")
+    r2 = get_instance_value(instance,"r2")
+    verts = []
+    segments = get_segments(data)
+    
+    if len(segments) != 4:
+        print ("Expected 4 segments")
+        return
+    
+    for s in segments:
+        if (s["name"] != "CIRCLE"):
+            print ("Unexpected!")
+            return
+                
+    if segments[0]["radi"] != r2:
+        #start on a r2 segment
+        seg = segments[0]
+        segments.remove(seg)
+        segments.append(seg)
+            
+    if segments[0]["radi"] == r2:
+        # Get rotation matrix and calc vertices!
+        i=0
+        im=len(segments[1]["verts"])
+        j=0
+        jm=len(segments[0]["verts"])
+        #generate_edges(segments[1]["verts"])
+        
+        
+        a = sub_v3_v3(segments[1]["verts"][0],segments[1]["center"])
+        b = sub_v3_v3(segments[1]["verts"][1],segments[1]["center"]) 
+        
+        
+        sign = segments[1]["sign"]
+        
+        iv = len(vertexs)
+        for i in range (0,im):
+            # continue  
+            a = sub_v3_v3(segments[1]["verts"][0],segments[1]["center"])
+            b = sub_v3_v3(segments[1]["verts"][i],segments[1]["center"])      
+            an = angle_v3_v3(np.array(a),np.array(b))*sign
+            rm = rotation_matrix_axis (segments[1]["plane"],an)
+            vv = []
+            for j in range(0,jm):
+                vertexs.append (np.dot(rm,segments[0]["verts"][j]))  
+                if (j==jm-1):
+                    None
+                    if (i==im-1):
+                        None
+                    else:
+                        edges.append([iv+i*jm+j,iv+i*jm+j+jm])
+                else:
+                    edges.append([iv+i*jm+j,iv+i*jm+j+1])
+                    if (i==im-1):
+                        None
+                    else:
+                        edges.append([iv+i*jm+j,iv+i*jm+j+jm])
+                        faces.append([iv+i*jm+j,iv+i*jm+j+1,iv+i*jm+j+jm+1,iv+i*jm+j+jm])
+    else:
+        print ("expected r2 segment") 
+         
+    #the other 2 segments are ignored       
+    
+    
+        
 ### INSTANCE STRUCTURES ####
 
 #X= PLANE('',#33);
@@ -484,7 +996,7 @@ structure["ADVANCED_FACE"] = "unknown","FACE_BOUND|FACE_OUTER_BOUND|data","PLANE
 structure["FACE_BOUND"] = "unknown1", "EDGE_LOOP|VERTEX_LOOP|loop", "unknown2"
 
 #X = FACE_OUTER_BOUND('',#1091,.T.);
-structure["FACE_OUTER_BOUND"] = "unknown1", "EDGE_LOOP|edge_loop", "unknown2"
+structure["FACE_OUTER_BOUND"] = "unknown1", "EDGE_LOOP|loop", "unknown2"
     
 #X = EDGE_LOOP('',(#20,#55,#83,#111));
 structure["EDGE_LOOP"] = "unknown1", "ORIENTED_EDGE|oriented_edges"
@@ -526,7 +1038,7 @@ structure["EDGE_CURVE"] = "unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SUR
 structure_func["EDGE_CURVE"] = {"first_load" : set_edge }
 
 #X = CIRCLE('',#3900,13.230000000000002);
-structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|AXIS2_PLACEMENT_2D|placement", "unknown2"
+structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|AXIS2_PLACEMENT_2D|placement", "float|radi"
 
 #X= ELLIPSE('',#539,7.296415549894075,5.053)
 structure["ELLIPSE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "r1", "r2"
@@ -562,14 +1074,12 @@ structure["PCURVE"] = "unknown","PLANE|SURFACE_OF_REVOLUTION|CYLINDRICAL_SURFACE
 
 #X = SEAM_CURVE('',#27,(#32,#48),.PCURVE_S1.);
 def seam_curve_load(instance):
-    #Assing to object to retrieve information 
-    #print_instance(instance)
-    pcurves = get_instance_value(instance, "pcurve")
-    for pcurve in pcurves:
-        obj = get_instance_value(pcurve,"object")
-        obj["data"]["seam_curve"] = instance
+    None
+    #print (get_instance_path(instance))
+    #print_instance (instance)
+    #print_instance_tree(instance)
      
-structure["SEAM_CURVE"] = "unknown", "CIRCLE|LINE|circle", "PCURVE|pcurve", "unknown2"
+structure["SEAM_CURVE"] = "unknown", "CIRCLE|LINE|geom", "PCURVE|pcurves", "unknown2"
 structure_func["SEAM_CURVE"] = {"first_load" : seam_curve_load }
 
 #X = SURFACE_OF_REVOLUTION('',#34,#39);
@@ -599,40 +1109,141 @@ structure_params["VERTEX_POINT"] = {"print_verbose" : 1}
 structure["CLOSED_SHELL"] = "unknown", "ADVANCED_FACE|data"
 
 #X = MANIFOLD_SOLID_BREP('',#16);
+a = 0
+b = 0
+def process_face_bound(fb, face, obj):
+    ret = None
+    loop = get_instance_value(fb,"loop")
+    new_edges = []
+    circles = []
+    if loop["name"] == "EDGE_LOOP":
+        for oe in get_instance_value(fb,["loop","oriented_edges"]):  
+            edge_curve = get_instance_value(oe, "edge_curve")
+            surf = get_instance_value(edge_curve,"object")
+            if (surf["name"] == "SURFACE_CURVE"):
+                object = get_instance_value(surf,"object")
+                if object and object["name" ] == "CIRCLE": 
+                    generate_circle_face(object)
+                elif object and object["name"] == "LINE":
+                    new_edges.append([
+                        get_instance_value(edge_curve, ["v1","vertex_id"]),
+                        get_instance_value(edge_curve, ["v2","vertex_id"])
+                    ])
+                elif object:
+                    print ("Unknown object " + object["name"])
+                else:
+                    print ("No object")
+                    
+            elif (surf["name"] == "SEAM_CURVE"):
+                if (obj["name"] == "CYLINDRICAL_SURFACE"):
+                    v1 = get_instance_value(edge_curve, "v1")
+                    v2 = get_instance_value(edge_curve, "v2")
+                    iv = len(vertexs)
+                    prec= 32
+                    for i in range (0,prec):
+                        a1 = ((math.pi*2)/prec)*i
+                        rm = rotation_matrix(a1,3)
+                        co_v1 = np.matmul (get_instance_value(v1, ["cartesian_point","coordinates"]),rm)
+                        co_v2 = np.matmul (get_instance_value(v2, ["cartesian_point","coordinates"]),rm)
+                        vertexs.append(co_v1)   
+                        vertexs.append(co_v2)
+                        edges.append([iv+i*2,iv+i*2+1])
+                        if (i==31):
+                            faces.append([iv+i*2,iv+i*2+1,iv+1,iv])
+                        else:
+                            faces.append([iv+i*2,iv+i*2+1,iv+(i+1)*2+1,iv+(i+1)*2])
+                elif obj["name"] == "SURFACE_OF_REVOLUTION":
+                    print ("TODO: generate surface of revolution")
+                else:
+                    print ("Unexpected object on seam curve: " + obj["name"])
+            elif (surf["name"] == "CIRCLE"):
+                circles.append(surf)
+            else:
+                print ("Unknown for face bound edge loop " + surf["name"])
+        
+        if len(new_edges) > 0:
+            faces.append(get_ordered_verts_from_edges(new_edges))
+        
+        if len(circles) > 0:
+            if len(circles) == 1:
+                ret = circles[0]
+            else:
+                print ("Found multiple circles", len(circles))
+                ret = circles[0]
+                
+    if loop["name"] == "VERTEX_LOOP":
+        if obj["name"] == "TOROIDAL_SURFACE":
+            generate_torus_faces(obj, face)
+        else:
+            print ("Unexpected object on vertex_loop " + obj["name"])
+            
+    #returns a surface instance, to be used on outer bound edge
+    return ret
+   
+def process_face_outer_bound(fb, face, obj, bound):    
+    #surf is a definet face_bound
+    loop = get_instance_value(fb,"loop")
+    data = []
+    if loop["name"] == "EDGE_LOOP":
+        for oe in get_instance_value(fb,["loop","oriented_edges"]):
+            
+            edge_curve = get_instance_value(oe, "edge_curve")
+            surf = get_instance_value(edge_curve,"object")
+                   
+            data.append({"surf" : surf, "edge_curve" : edge_curve})
+        
+    if obj["name"] == "TOROIDAL_SURFACE":        
+        generate_torus_from_outbound(obj, data)
+    elif obj["name"] == "PLANE":
+        generate_planar_faces_from_outbound(obj,data, bound)
+    elif obj["name"] == "CYLINDRICAL_SURFACE":
+        generate_cylindrical_faces_from_outbound(obj,data)
+    else:
+        print ("Unknown object to apply outer bound ",obj["name"])
+
 def set_faces (instance):
+    global a, b
     print ("Solid data")
     for face in get_instance_value(instance, ["closed_shell", "data"]):
         if (face["name"] == "ADVANCED_FACE"):
+            surf = None
             obj = get_instance_value(face,"def")
             if obj["name"] == "PLANE":
-                for fb in get_instance_value(face,["data"]):
-                    if (fb["name"] == "FACE_BOUND"):
-                        oedges = get_instance_value(fb, ["loop","oriented_edges"])
-                        if oedges:
-                            loop = False
-                            for oe in oedges:
-                                edge_curve = get_instance_value(oe, "edge_curve")
-                                surf = get_instance_value(edge_curve,"object")
-                                object = get_instance_value(surf,"object")
-                                if object and object["name"] == "CIRCLE": 
-                                    print ("A Circle")
-                                elif object and object["name"] == "LINE":
-                                    loop = True
-                                elif object:
-                                    print("unknown " + object["name"])
-                            if loop:
-                                faces.append(get_edge_loop_verts(get_instance_value(fb, ["loop"])))
-                    elif (fb["name"] == "FACE_OUTER_BOUND"):
-                        None
-                        #faces.append(get_edge_loop_verts(get_instance_value(fb, ["edge_loop"])))
-                    else:
-                        print ("Unknown instance "  + fb["name"])
+                None
             elif obj["name"] == "TOROIDAL_SURFACE":
-                generate_torus_faces(obj, face)
+                None
             elif obj["name"] == "CYLINDRICAL_SURFACE":
-                generate_cilinder_faces(obj, face)
+                None
+            elif obj["name"] == "SURFACE_OF_REVOLUTION":
+                None
             else:
-                print ("Unknow definition " + obj["name"])
+                print ("Unknow definition for advanced face " + obj["name"])
+                
+            for fb in get_instance_value(face,["data"]):
+                if fb["name"] == "FACE_BOUND":
+                    if surf != None:
+                        print ("More than one face bound?")
+                    surf = process_face_bound (fb, face, obj)
+                elif fb["name"] == "FACE_OUTER_BOUND":
+                    #Process alwas face bound first, outer in next loop
+                    None
+                else:
+                    print ("Unknown instance "  + fb["name"])
+                    
+            for fb in get_instance_value(face,["data"]):
+                if fb["name"] == "FACE_OUTER_BOUND":
+                    process_face_outer_bound(fb, face, obj, surf)
+               
+            
+            if obj["name"] == "PLANE":
+                None
+            elif obj["name"] == "TOROIDAL_SURFACE":
+                a = a +1
+            elif obj["name"] == "CYLINDRICAL_SURFACE":
+                b = b +1
+            elif obj["name"] == "SURFACE_OF_REVOLUTION":
+                None
+
         else:
             print ("Unknown instance")
         
@@ -646,7 +1257,10 @@ structure_params["DIRECTION"] = {"print_verbose" : 2}
 #X = CARTESIAN_POINT('',(0.,0.,0.));
 #X = CARTESIAN_POINT('',(0.,0.));
 def cartesian_point_load(instance):
-    None
+    co = get_instance_value(instance,"coordinates")
+    if False and len(co) == 3 and co[2] == 10:
+        print(get_instance_path(instance))
+        print("")
     
 structure["CARTESIAN_POINT"] = "unknown", "float|coordinates"
 structure_params["CARTESIAN_POINT"] = {"print_verbose" : 2}
@@ -936,6 +1550,18 @@ def read_stp(filepath):
 if __name__ == '__main__':
     import sys
     import bpy
+    
+    print ()
+    print ()
+    print ()
+    print ()
+    
+    bpy.ops.object.select_all()
+    # remove all selected.
+    bpy.ops.object.delete()
+    # remove the meshes, they have no users anymore.
+    for item in bpy.data.meshes:
+        bpy.data.meshes.remove(item)
 
     #filepaths = sys.argv[sys.argv.index('--') + 1:]
     
@@ -944,10 +1570,10 @@ if __name__ == '__main__':
     
     test_folder = "/home/jaume/src/mechanical-blender-addons/io_scene_stp/test_files/"
         
-    #read_stp(test_folder + "cube.stp")
-    #read_stp(test_folder + "torus.stp")
-    #read_stp(test_folder + "revolve.stp")
-    read_stp(test_folder + "cylinder.stp")
-    #read_stp(test_folder + "SIEM-CONJ-L00025.stp")
-    #read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
+    #read_stp(test_folder + "cube.stp") #OK
+    #read_stp(test_folder + "torus.stp") #OK
+    #read_stp(test_folder + "revolve.stp") #UNFINISHED
+    #read_stp(test_folder + "cylinder.stp")  #OK
+    #read_stp(test_folder + "SIEM-CONJ-L00025.stp")  "NOK"
+    read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
     
