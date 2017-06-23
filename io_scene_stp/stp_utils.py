@@ -49,6 +49,10 @@ faces = [] # Mesh Faces
 
 print_verbose_level = 10
 
+torus_from_outbound = 1
+cylindrical_faces_from_outbound = 1
+circular_ring = 1
+
 ### UTILS ####
 
 def p3_p3_dist (a,b):
@@ -74,6 +78,24 @@ def normalize_v3 (a):
 
 def eq_v3 (a,b):
     return a[0]==b[0] and a[1]==b[1] and a[2]==b[2]
+
+def convert_v3_to_v4 (v, val = 0):
+    ret = [0,0,0,val]
+    ret[0], ret[1], ret[2] = v[0], v[1], v[2]
+    return ret
+
+def convert_v4_to_v3 (v):
+    ret = [0,0,0]
+    ret[0], ret[1], ret[2] = v[0], v[1], v[2]
+    return ret    
+
+def convert_m4_to_m3 (m):
+    ret = []
+    ret.append(convert_v4_to_v3(m[0]))
+    ret.append(convert_v4_to_v3(m[1]))
+    ret.append(convert_v4_to_v3(m[2]))
+    return ret
+    
 
 # Cosine Theorem
 def a_from_b_c_A (b, c, A):
@@ -579,6 +601,17 @@ def rotation_matrix_axis(axis, theta):
                      [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
                      [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
                      
+
+def translate_matrix (m, v3):
+    ret = []
+    for i in range (0,4):
+        ret.append([m[i][0],m[i][1],m[i][2],m[i][3]])
+        
+    for i in range(0,3):
+        ret[3][i] = ret[3][i]+v3[i]
+        
+    return ret 
+                     
         
 def generate_torus_faces (instance, face):
     if instance["name"] != "TOROIDAL_SURFACE":
@@ -599,11 +632,8 @@ def generate_torus_faces (instance, face):
             a2 = ((math.pi*2)/prec)*j
             v4 = [math.cos(a2)*r2,0.0, math.sin(a2)*r2, 1.0]
             v4 = np.matmul(v4,tm)
-            v3 = [0,0,0]
-            for k in range(0,3):
-                v3[k] = v4[k]
                  
-            vertexs.append(v3)
+            vertexs.append(convert_v4_to_v3(v4))
 
             if j==31:
                 edges.append([iv+i*32+j,iv+i*32+1])
@@ -619,55 +649,43 @@ def generate_torus_faces (instance, face):
                 else:
                     edges.append([iv+i*32+j,iv+(i+1)*32+j])
                     faces.append([iv+i*32+j,iv+(i+1)*32+j,iv+(i+1)*32+j+1,iv+i*32+j+1])
-          
-def generate_cilinder_faces(instance, face):          
-    if not instance["name"] == "FACE_BOUND":
-        return
+   
+def get_circle_verts(pm, r):
     
+    verts = []
+    prec = 32
+    #iv = len(vertexs)
+    for i in range(0,prec):
+        a = ((math.pi*2)/prec)*i
+        v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
+        v4 = np.matmul(v4,pm)
+                 
+        verts.append(convert_v4_to_v3(v4))
+        #vertexs.append(v3)
+        #if i== 31:
+        #    edges.append([iv+i,iv])
+        #else:
+        #    edges.append([iv+i,iv+i+1])
+        
+    #faces.append(range(iv,iv+32))
+    return verts
     
-    oedges = get_instance_value(instance, ["loop","oriented_edges"])
-    if oedges:
-        loop = False
-        for oe in oedges:
-            edge_curve = get_instance_value(oe, "edge_curve")
-            surf = get_instance_value(edge_curve,"object")
-            object = get_instance_value(surf,"object")
-            print_instance(surf,1)
-            if object and object["name" ] == "CIRCLE": 
-                generate_circle_face(object)
-            elif object and object["name"] == "LINE":
-                loop = True
-            elif object:
-                print("unknown " + object["name"])
-        if loop:
-            faces.append(get_edge_loop_verts(get_instance_value(instance, ["loop"])))
-    
+ 
     
 def generate_circle_face (instance):
     if instance["name"] != "CIRCLE":
         return 
     
-    #print_instance_tree(instance)
-    #print (get_instance_path(instance))
     
-    r = get_instance_value(instance,"radi")
-    pm = get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement"))
-    prec = 32
+    verts = get_circle_verts(
+        get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement")),
+        get_instance_value(instance,"radi")
+    )
+    
     iv = len(vertexs)
-    for i in range(0,prec):
-        a = ((math.pi*2)/prec)*i
-        v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
-        v4 = np.matmul(v4,pm)
-        v3 = [0,0,0]
-        for k in range(0,3):
-            v3[k] = v4[k]
-                 
+    for v in verts:
         vertexs.append(v3)
-        if i== 31:
-            edges.append([iv+i,iv])
-        else:
-            edges.append([iv+i,iv+i+1])
-        
+    
     faces.append(range(iv,iv+32))
     
     
@@ -691,27 +709,25 @@ def get_arc_verts (instance, p1, p2):
     pm = get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement"))
     
     prec = 32
-    
-    
+
     l = a_from_b_c_A (r,r,(math.pi*2)/prec)
 
     sign = -1
     
     #find first point
-    s = 1
+    s = 0
     for i in range(0,prec):
         a = ((math.pi*2)/prec)*i * sign
         v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
         v4 = np.matmul(v4,pm)
-        v3 = [0,0,0]
-        for k in range(0,3):
-            v3[k] = v4[k]
             
-        if p3_p3_dist (v3,p1) <= l:
+        if p3_p3_dist (v4,p1) <= l:
             s = i+1
             break
         
     verts.append(p1)
+    
+    match = None
 
     for i in range(0,prec):
 
@@ -719,16 +735,22 @@ def get_arc_verts (instance, p1, p2):
 
         v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
         v4 = np.matmul(v4,pm)
-        v3 = [0,0,0]
-        for k in range(0,3):
-            v3[k] = v4[k]
         
-        if p3_p3_dist (v3,p2) <= l:    
+        if match is not None:
+            if p3_p3_dist (v4,p2) < l:
+                verts.append(convert_v4_to_v3(match))
+                    
             verts.append(p2)
-            break
+            break;    
+                
+        if p3_p3_dist (v4,p2) < l:    
+            # Precision problems, do not break, test next
+            match = v4 
+            #verts.append(p2)
+            #break
         else:
             # Last Point
-            verts.append(v3)
+            verts.append(convert_v4_to_v3(v4))
             
     return verts
             
@@ -746,6 +768,35 @@ def generate_edges (verts):
 def generate_arc (instance, p1, p2):
     verts = get_arc_verts(instance, p1, p2)
     generate_edges(verts)
+    
+def generate_circular_ring (center, plane, r1, r2):
+    if not circular_ring:
+        return 
+    
+    global vertexs
+    x = [0,0,1]
+    if (np.dot(x,plane) in [1,-1]):
+        x = [0,1,0]
+    tm = []
+    
+    tm.append (convert_v3_to_v4(x))
+    tm.append (convert_v3_to_v4(np.cross(x, plane)))
+    tm.append (convert_v3_to_v4(plane))
+    tm.append (convert_v3_to_v4(center,1))
+    
+    
+    iv = len(vertexs)
+    v1 = get_circle_verts(tm,r1)
+    v2 = get_circle_verts(tm,r2)
+    
+    for i in range (0,32):
+        vertexs.append(v1[i])
+        vertexs.append(v2[i])
+        
+        if (i==31):
+            faces.append([iv+i*2, iv, iv+1, iv+i*2+1])
+        else:
+            faces.append([iv+i*2, iv+i*2+2, iv+i*2+3, iv+i*2+1])
         
 
 def order_segments (segments):
@@ -794,43 +845,48 @@ def get_segments(data, gen_edges = False):
         i=i+1
     
     if gen_edges:
+        print ("Debug: Drawing generated edges")
         for i in range(0, len(segments)):
            generate_edges(segments[i]["verts"])
             
     return order_segments(segments)
 
 
-def generate_planar_faces_from_outbound (instance, data, surf):
-    segments = get_segments (data, True)
-    if surf["name"] == "CIRCLE":
+def generate_planar_faces_from_outbound (instance, data, segment):
+    segments = get_segments (data)
+    if segment["name"] == "CIRCLE":
         if len(segments) == 1 and segments[0]["name"] == "CIRCLE":
-            r1 = get_instance_value(surf,"radi")
-            tm = get_matrix_from_axis2_placement_3d(get_instance_value(surf,"placement"))
-            print ("check tm of both objects")
-            r2 = segments[0]["radi"]
-            print ("Ring of" , r1, r2)
+            ca, cb = segment, segments[0]
+            r1, r2 = ca["radi"], cb["radi"]
+            if eq_v3(ca["center"], cb["center"]) and np.dot(ca["plane"], cb["plane"]) in [1,-1]:
+                generate_circular_ring (ca["center"], ca["plane"], r1, r2)
+            else: 
+                print ("Not in concentric or in same plane")
         else:
             print ("Not perfomed")
     else:
         print ("Unknown planar surface to apply face bound")
     
 def generate_cylindrical_faces_from_outbound (instance, data):
-    #return 
+    if not cylindrical_faces_from_outbound:
+        return
+    
     global faces, edges, vertexs
     
     segments = get_segments(data)
+    
     
     if len(segments) != 4:
         print ("Expected 4 segments")
         return
     
-    if segments[0]["name"] != "CIRCLE":
+    if segments[0]["name"] != "ARC":
         #start on a circle
         seg = segments[0]
         segments.remove(seg)
         segments.append(seg)
         
-    if segments[0]["name"] == "CIRCLE" and segments[1]["name"] == "LINE":
+    if segments[0]["name"] == "ARC" and segments[1]["name"] == "LINE":
         # Get rotation matrix and calc vertices!
         i=0
         iv = len(vertexs)
@@ -846,7 +902,7 @@ def generate_cylindrical_faces_from_outbound (instance, data):
             if i==im-1:
                 None
             else:
-               faces.append ([iv+i*2, iv+i*2+1, iv+i*2+3,iv+i*2+2]) 
+                faces.append ([iv+i*2, iv+i*2+1, iv+i*2+3,iv+i*2+2]) 
         
     else:
         print ("expected circle and line")
@@ -857,19 +913,28 @@ def generate_cylindrical_faces_from_outbound (instance, data):
 def append_to_segment(segments, surf, edge_curve):
     if surf["name"] == "CIRCLE":
         segments.append ({
-                            "name" : surf["name"],
                             "radi": get_instance_value(surf, "radi"), 
-                            "verts" : get_arc_verts(
-                                surf,
-                                get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
-                                get_instance_value(edge_curve, ["v2","cartesian_point","coordinates"])
-                            ),
                             "center" : get_instance_value(surf, ["placement", "point","coordinates"]),
                             "plane" : list(get_plane_from_axis2_placement_3d(get_instance_value(surf,"placement"))),
                             "pm" : get_matrix3_from_axis2_placement_3d(get_instance_value(surf,"placement")),
                             "tm" : get_matrix_from_axis2_placement_3d(get_instance_value(surf,"placement")),
                             "sign" : 1
                         })
+        
+        if edge_curve:
+            segments[-1]["verts"] =  get_arc_verts(
+                                surf,
+                                get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
+                                get_instance_value(edge_curve, ["v2","cartesian_point","coordinates"])
+                            )
+            segments[-1]["name"] = "ARC"
+        else:
+            segments[-1]["verts"] = get_circle_verts (
+                get_matrix_from_axis2_placement_3d(get_instance_value(surf,"placement")),
+                get_instance_value(surf,"radi")
+            )
+            segments[-1]["name"] = "CIRCLE"
+
     elif surf["name"] == "LINE":
         segments.append ({
                             "name" : surf["name"],
@@ -885,7 +950,7 @@ def append_to_segment(segments, surf, edge_curve):
 
 def continue_segment (segments, surf, edge_curve):
     prv = segments[-1]
-    if surf["name"] == prv["name"] == "CIRCLE":
+    if surf["name"] == "CIRCLE" and prv["name"] == "ARC":
         if prv["radi"] == get_instance_value(surf, "radi") and prv["center"] == get_instance_value(surf, ["placement", "point","coordinates"]):
             #continue
             v = get_arc_verts(
@@ -905,18 +970,46 @@ def continue_segment (segments, surf, edge_curve):
                 prv["sign"] = prv["sign"] * -1
             else:
                 print ("Error") 
-            
+                
+            if eq_v3(prv["verts"][0], prv["verts"][-1]):
+                prv["name"] = "CIRCLE"
+                
             return True
         else:
             return False
     else:
         return False
 
+def segments_compare (seg1, seg2):
+    ret = True
+    ret = ret and seg1["name"] == seg2["name"]
+    if ret and seg1["name"] == "CIRCLE":
+        ret = ret and seg1["radi"] == seg2["radi"]
+        ret = ret and len(seg1["verts"]) == len(seg2["verts"])
+        ret = ret and eq_v3(seg1["center"], seg2["center"])
+        ret = ret and np.dot(seg1["plane"], seg2["plane"]) in [1,-1]
+    elif ret:
+        print ("not compared")
+                
+    return ret
+        
 
+def remove_duplicate_segments (segments):
+    i = 0
+    while i < len(segments):
+        j=i+1
+        while j < len (segments):
+            if segments_compare(segments[i],segments[j]):
+                del segments[j]
+            else:
+                j = j+1
+        i = i +1
     
 #asumes 4 closed edges            
 def generate_torus_from_outbound (instance, data):
-    #return
+    if not torus_from_outbound:
+        return
+    
     global faces, edges, vertexs
     
     r1 = get_instance_value(instance,"r1")
@@ -925,11 +1018,11 @@ def generate_torus_from_outbound (instance, data):
     segments = get_segments(data)
     
     if len(segments) != 4:
-        print ("Expected 4 segments")
+        print ("Torus outbound: Expected 4 segments")
         return
     
     for s in segments:
-        if (s["name"] != "CIRCLE"):
+        if (s["name"] != "ARC"):
             print ("Unexpected!")
             return
                 
@@ -980,8 +1073,42 @@ def generate_torus_from_outbound (instance, data):
     else:
         print ("expected r2 segment") 
          
-    #the other 2 segments are ignored       
+    #the other 2 segments are ignored   
     
+def generate_spherical_surface (pm, r):
+    global vertexs,faces
+    prec = 32
+    h = [0,0,0]
+    pm3 = convert_m4_to_m3(pm)
+    iv = len(vertexs)
+    for i in range(0,17):
+        a = ((math.pi*2)/prec)*i
+        x,y = math.sin(a)*r, math.cos(a)*r    
+        h[0], h[1], h[2] = 0, 0, y  
+        h = np.dot(h,pm3)
+        tm = translate_matrix(pm,h)
+        verts = get_circle_verts(tm,x)    
+        for j in range (0,prec):
+            vertexs.append(verts[j])
+            if i == 16:
+                None
+            else:
+                if j==prec-1:
+                    faces.append ([iv+i*prec+j,iv+i*prec,iv+(i+1)*prec,iv+(i+1)*prec+j])
+                else:
+                    faces.append ([iv+i*prec+j,iv+i*prec+j+1,iv+(i+1)*prec+j+1,iv+(i+1)*prec+j]) 
+    
+def generate_spherical_surface_from_outbound (instance, data):
+    segments = get_segments(data)
+    
+    if len(segments) == 1:
+        #Do not know what to do with
+        generate_spherical_surface (
+            get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement")),
+            get_instance_value(instance,"radi")
+        )
+    else:
+        print ("Outbound not applied")
     
         
 ### INSTANCE STRUCTURES ####
@@ -1011,31 +1138,7 @@ structure["ORIENTED_EDGE"] = "unknown1", "unknown2", "unknown3", "EDGE_CURVE|edg
 structure["CONICAL_SURFACE"] = "unknown1", "AXIS2_PLACEMENT_3D|axis2_placement3d", "unknown2", "uknown3"
 
 #X = EDGE_CURVE('',#22,#24,#26,.T.);
-def set_edge(instance):
-    global edges
-    
-    #v1 = get_instance_value(instance, ["v1","vertex_id"])
-    #v2 = get_instance_value(instance, ["v2", "vertex_id"])
-    #edges.append([v1,v2])
-    
-    object = get_instance_value(instance,"object")
-    if object["name"] == "SURFACE_CURVE": 
-        None
-    elif object["name"] == "CIRCLE":
-        None
-    elif object["name"] == "LINE":
-        None
-    elif object["name"] == "B_SPLINE_CURVE_WITH_KNOTS":
-        None
-    elif object["name"] == "ELLIPSE": 
-        None
-    elif object["name"] == "SEAM_CURVE": 
-        None
-    else:
-        print ("Unkown object")
-        
 structure["EDGE_CURVE"] = "unknown1", "VERTEX_POINT|v1", "VERTEX_POINT|v2", "SURFACE_CURVE|CIRCLE|LINE|B_SPLINE_CURVE_WITH_KNOTS|ELLIPSE|SEAM_CURVE|object", "unknown5"
-structure_func["EDGE_CURVE"] = {"first_load" : set_edge }
 
 #X = CIRCLE('',#3900,13.230000000000002);
 structure["CIRCLE"] = "unknown1", "AXIS2_PLACEMENT_3D|AXIS2_PLACEMENT_2D|placement", "float|radi"
@@ -1052,7 +1155,7 @@ structure["SURFACE_CURVE"] = "unknown", "LINE|CIRCLE|object", "PCURVE|data", "un
 structure_func["SURFACE_CURVE"] = { "load" : surface_curve_load }
 
 #X = SPHERICAL_SURFACE('',#387,4.25);
-structure["SPHERICAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|radi"
+structure["SPHERICAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|placement", "float|radi"
 
 #X = TOROIDAL_SURFACE('',#3175,1.399999999999998,0.300000000000002);
 structure["TOROIDAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|r1", "float|r2"
@@ -1115,7 +1218,7 @@ def process_face_bound(fb, face, obj):
     ret = None
     loop = get_instance_value(fb,"loop")
     new_edges = []
-    circles = []
+    segments = []
     if loop["name"] == "EDGE_LOOP":
         for oe in get_instance_value(fb,["loop","oriented_edges"]):  
             edge_curve = get_instance_value(oe, "edge_curve")
@@ -1157,19 +1260,18 @@ def process_face_bound(fb, face, obj):
                 else:
                     print ("Unexpected object on seam curve: " + obj["name"])
             elif (surf["name"] == "CIRCLE"):
-                circles.append(surf)
+                append_to_segment (segments, surf, None)
             else:
                 print ("Unknown for face bound edge loop " + surf["name"])
         
         if len(new_edges) > 0:
             faces.append(get_ordered_verts_from_edges(new_edges))
         
-        if len(circles) > 0:
-            if len(circles) == 1:
-                ret = circles[0]
-            else:
-                print ("Found multiple circles", len(circles))
-                ret = circles[0]
+        if len(segments) > 0:
+            remove_duplicate_segments(segments)
+            if len(segments) > 1:
+                print ("Found multiple segments", len(segments))
+            ret = segments[0]
                 
     if loop["name"] == "VERTEX_LOOP":
         if obj["name"] == "TOROIDAL_SURFACE":
@@ -1184,6 +1286,7 @@ def process_face_outer_bound(fb, face, obj, bound):
     #surf is a definet face_bound
     loop = get_instance_value(fb,"loop")
     data = []
+    global b
     if loop["name"] == "EDGE_LOOP":
         for oe in get_instance_value(fb,["loop","oriented_edges"]):
             
@@ -1198,32 +1301,32 @@ def process_face_outer_bound(fb, face, obj, bound):
         generate_planar_faces_from_outbound(obj,data, bound)
     elif obj["name"] == "CYLINDRICAL_SURFACE":
         generate_cylindrical_faces_from_outbound(obj,data)
+    elif obj["name"] == "SPHERICAL_SURFACE":
+        generate_spherical_surface_from_outbound(obj, data)
     else:
         print ("Unknown object to apply outer bound ",obj["name"])
 
 def set_faces (instance):
     global a, b
     print ("Solid data")
+    segment = None
     for face in get_instance_value(instance, ["closed_shell", "data"]):
         if (face["name"] == "ADVANCED_FACE"):
             surf = None
             obj = get_instance_value(face,"def")
-            if obj["name"] == "PLANE":
-                None
-            elif obj["name"] == "TOROIDAL_SURFACE":
-                None
-            elif obj["name"] == "CYLINDRICAL_SURFACE":
-                None
-            elif obj["name"] == "SURFACE_OF_REVOLUTION":
-                None
-            else:
-                print ("Unknow definition for advanced face " + obj["name"])
+            if not obj["name"] in  ["PLANE",
+                                    "TOROIDAL_SURFACE", 
+                                    "CYLINDRICAL_SURFACE", 
+                                    "SURFACE_OF_REVOLUTION",
+                                    "SPHERICAL_SURFACE"]:
+                                        
+                print ("Unknown definition for advanced face " + obj["name"])
                 
             for fb in get_instance_value(face,["data"]):
                 if fb["name"] == "FACE_BOUND":
                     if surf != None:
                         print ("More than one face bound?")
-                    surf = process_face_bound (fb, face, obj)
+                    segment = process_face_bound (fb, face, obj)
                 elif fb["name"] == "FACE_OUTER_BOUND":
                     #Process alwas face bound first, outer in next loop
                     None
@@ -1232,7 +1335,7 @@ def set_faces (instance):
                     
             for fb in get_instance_value(face,["data"]):
                 if fb["name"] == "FACE_OUTER_BOUND":
-                    process_face_outer_bound(fb, face, obj, surf)
+                    process_face_outer_bound(fb, face, obj, segment)
                
             
             if obj["name"] == "PLANE":
