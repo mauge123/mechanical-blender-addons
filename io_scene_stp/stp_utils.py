@@ -121,6 +121,44 @@ def sin_cos_angle_v3_v3 (a,b):
         
     return sin, cos 
 
+
+def rotation_matrix (angle, dim=4):
+    return rotation_matrix_sin_cos (math.sin(angle), math.cos(angle), dim)
+    
+def rotation_matrix_sin_cos (sin, cos, dim=4):
+    if dim == 4:
+        return [[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    if dim == 3:
+        return [[cos, -sin, 0], [sin, cos, 0], [0, 0, 1]]
+    
+    
+def rotation_matrix_axis(axis, theta):
+    """
+    Return the rotation matrix associated with counterclockwise rotation about
+    the given axis by theta radians.
+    """
+    axis = np.asarray(axis)
+    axis = axis/math.sqrt(np.dot(axis, axis))
+    a = math.cos(theta/2.0)
+    b, c, d = -axis*math.sin(theta/2.0)
+    aa, bb, cc, dd = a*a, b*b, c*c, d*d
+    bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
+    return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
+                     [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
+                     [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
+                     
+
+def translate_matrix (m, v3):
+    ret = []
+    for i in range (0,4):
+        ret.append([m[i][0],m[i][1],m[i][2],m[i][3]])
+        
+    for i in range(0,3):
+        ret[3][i] = ret[3][i]+v3[i]
+        
+    return ret 
+                     
+
 ### COMMON FUNCTION ###
 
 def read_stp_single_line(f):
@@ -515,46 +553,6 @@ def parse_params(str, params):
     
 ### INSTANCE UTILS ###
 
-# Retuns verts of an edge loop
-def get_ordered_verts_from_edges(edges):
-    
-    verts = []
-    
-                
-    ordered_edges = []
-    ordered_edges.append(edges[0])
-    edges.remove(edges[0])
-    
-    ok = True
-    while len(edges) and ok:
-        ok = False
-        for ed in edges:
-            if (ed[1] == ordered_edges[-1][1]):
-                #swap
-                 ed[0], ed[1] = ed[1], ed[0]
-                
-            if (ed[0] == ordered_edges[-1][1]):
-                ordered_edges.append(ed)
-                edges.remove(ed)
-                ok = True
-                break
-
-    if not ok:
-        print ("ERROR: incorrect loop")        
-                     
-    if (ordered_edges[0][0] != ordered_edges[-1][1]):
-        print ("ERROR: incorrect loop, not closed")     
-
-    for ed in ordered_edges:
-        if (not ed[0] in verts):
-            verts.append(ed[0])
-
-        if (not ed[1] in verts):
-            verts.append(ed[1])
-
-    return verts
-
-
 def get_plane_from_axis2_placement_3d(instance):
     return np.array(get_instance_value(instance,["dir1","values"]))
     
@@ -575,43 +573,6 @@ def get_matrix3_from_axis2_placement_3d(instance):
     dir3 = np.cross(dir1,dir2)
     
     return [dir3, dir2, dir1]
-
-def rotation_matrix (angle, dim=4):
-    return rotation_matrix_sin_cos (math.sin(angle), math.sin(cos), dim)
-    
-def rotation_matrix_sin_cos (sin, cos, dim=4):
-    if dim == 4:
-        return [[cos, -sin, 0, 0], [sin, cos, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
-    if dim == 3:
-        return [[cos, -sin, 0], [sin, cos, 0], [0, 0, 1]]
-    
-    
-def rotation_matrix_axis(axis, theta):
-    """
-    Return the rotation matrix associated with counterclockwise rotation about
-    the given axis by theta radians.
-    """
-    axis = np.asarray(axis)
-    axis = axis/math.sqrt(np.dot(axis, axis))
-    a = math.cos(theta/2.0)
-    b, c, d = -axis*math.sin(theta/2.0)
-    aa, bb, cc, dd = a*a, b*b, c*c, d*d
-    bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
-    return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac)],
-                     [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab)],
-                     [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc]])
-                     
-
-def translate_matrix (m, v3):
-    ret = []
-    for i in range (0,4):
-        ret.append([m[i][0],m[i][1],m[i][2],m[i][3]])
-        
-    for i in range(0,3):
-        ret[3][i] = ret[3][i]+v3[i]
-        
-    return ret 
-                     
         
 def generate_torus_faces (instance, face):
     if instance["name"] != "TOROIDAL_SURFACE":
@@ -802,33 +763,34 @@ def generate_circular_ring (center, plane, r1, r2):
 def order_segments (segments):
     new_segments = []
     new_segments.append(segments[0])
-    segments.remove(segments[0])
-    ok = True
-    while len(segments) and ok:
-        ok = False
-        i=0
-        for seg in segments:
-            if (seg["verts"][0] == new_segments[-1]["verts"][-1]):
-                new_segments.append(seg)
-                #segments.remove(seg)
-                del segments[i]
-                ok = True
-                break
-            if (seg["verts"][-1] == new_segments[-1]["verts"][-1]):
-                seg["verts"] = list(reversed(seg["verts"]))
-                seg["sign"] = seg["sign"] * -1
-                new_segments.append(seg)
-                #segments.remove(seg)
-                del segments[i]
-                ok = True
-                break
-            i=i+1
-            
-    if (not ok):
-        print ("Incorrect loop")
-    elif (new_segments[0]["verts"][0] != new_segments[-1]["verts"][-1]):
-        print ("Not closed loop")
-    
+    if len(segments)>1 :
+        segments.remove(segments[0])
+        ok = True
+        while len(segments) and ok:
+            ok = False
+            i=0
+            for seg in segments:
+                if (seg["verts"][0] == new_segments[-1]["verts"][-1]):
+                    new_segments.append(seg)
+                    #segments.remove(seg)
+                    del segments[i]
+                    ok = True
+                    break
+                if (seg["verts"][-1] == new_segments[-1]["verts"][-1]):
+                    seg["verts"] = list(reversed(seg["verts"]))
+                    seg["sign"] = seg["sign"] * -1
+                    new_segments.append(seg)
+                    #segments.remove(seg)
+                    del segments[i]
+                    ok = True
+                    break
+                i=i+1
+                
+        if (not ok):
+            print ("Incorrect loop")
+        elif (new_segments[0]["verts"][0] != new_segments[-1]["verts"][-1]):
+            print ("Not closed loop")
+        
     return new_segments
 
 def get_segments(data, gen_edges = False):
@@ -851,6 +813,18 @@ def get_segments(data, gen_edges = False):
             
     return order_segments(segments)
 
+
+def generate_surface_from_segments (segments):
+    segments = order_segments(segments)
+    iv = len(vertexs)
+    last = None
+    for i in range (0, len(segments)):
+        for v in segments[i]["verts"]:
+            if not (last and eq_v3(v,last)):
+                last = v
+                vertexs.append (v)
+                
+    faces.append(range (iv, len(vertexs)))            
 
 def generate_planar_faces_from_outbound (instance, data, segment):
     segments = get_segments (data)
@@ -914,6 +888,14 @@ def generate_cylindrical_faces_from_outbound (instance, data):
     
 def append_to_segment(segments, surf, edge_curve):
     if surf["name"] == "CIRCLE":
+        if edge_curve:
+            if get_instance_value(edge_curve,"v1")["number"] == get_instance_value(edge_curve,"v2")["number"]:
+                arc = False
+            else:
+                arc = True
+        else:
+            arc = False
+            
         segments.append ({
                             "radi": get_instance_value(surf, "radi"), 
                             "center" : get_instance_value(surf, ["placement", "point","coordinates"]),
@@ -923,7 +905,7 @@ def append_to_segment(segments, surf, edge_curve):
                             "sign" : 1
                         })
         
-        if edge_curve:
+        if arc:
             segments[-1]["verts"] =  get_arc_verts(
                                 surf,
                                 get_instance_value(edge_curve, ["v1","cartesian_point","coordinates"]),
@@ -1219,23 +1201,16 @@ b = 0
 def process_face_bound(fb, face, obj):
     ret = None
     loop = get_instance_value(fb,"loop")
-    new_edges = []
     segments = []
+    surface_segments = []
     if loop["name"] == "EDGE_LOOP":
         for oe in get_instance_value(fb,["loop","oriented_edges"]):  
             edge_curve = get_instance_value(oe, "edge_curve")
             surf = get_instance_value(edge_curve,"object")
             if (surf["name"] == "SURFACE_CURVE"):
                 object = get_instance_value(surf,"object")
-                if object and object["name" ] == "CIRCLE": 
-                    generate_circle_face(object)
-                elif object and object["name"] == "LINE":
-                    new_edges.append([
-                        get_instance_value(edge_curve, ["v1","vertex_id"]),
-                        get_instance_value(edge_curve, ["v2","vertex_id"])
-                    ])
-                elif object:
-                    print ("Unknown object " + object["name"])
+                if object:
+                    append_to_segment (surface_segments, object, edge_curve)
                 else:
                     print ("No object")
                     
@@ -1266,8 +1241,8 @@ def process_face_bound(fb, face, obj):
             else:
                 print ("Unknown for face bound edge loop " + surf["name"])
         
-        if len(new_edges) > 0:
-            faces.append(get_ordered_verts_from_edges(new_edges))
+        if len(surface_segments) > 0:
+            generate_surface_from_segments(surface_segments)    
         
         if len(segments) > 0:
             remove_duplicate_segments(segments)
@@ -1436,10 +1411,6 @@ def init_object(instance):
 def import_shape(instance):
     global object_name
     print ("Importing: " + object_name)
-    if object_name == "inafag_6010_brbohxyclh6y8oik8swwpry0n_1":
-        None
-        #print_instance (instance,4)
-    
     import_data_to_blender()
 
 structure["ADVANCED_BREP_SHAPE_REPRESENTATION"] = "unknown1", "AXIS2_PLACEMENT_3D|MANIFOLD_SOLID_BREP|data", "multiple|unknown2"
@@ -1678,7 +1649,7 @@ if __name__ == '__main__':
     #read_stp(test_folder + "cube.stp") #OK
     #read_stp(test_folder + "torus.stp") #OK
     #read_stp(test_folder + "revolve.stp") #UNFINISHED
-    #read_stp(test_folder + "cylinder.stp")  #OK
+    read_stp(test_folder + "cylinder.stp")  #OK
     #read_stp(test_folder + "SIEM-CONJ-L00025.stp")  "NOK"
-    read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
+    #read_stp(test_folder + "inafag_6010_brbohxyclh6y8oik8swwpry0n.stp")
     
