@@ -29,6 +29,7 @@ import re
 import bpy
 import numpy as np
 import math
+import bmesh
 
 '''
 File structure definition. Array in the following form
@@ -1660,9 +1661,27 @@ def import_data_to_blender():
     #print (edges)
     #print (faces)
     me.from_pydata(vertexs, edges, faces)
-
+    
     me.validate()    
     me.update()
+
+    
+    #remove doubles    
+    bm = bmesh.new()   # create an empty BMesh
+    bm.from_mesh(me)   # fill it in from a Mesh
+    
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.1)
+    
+    # Finish up, write the bmesh back to the mesh
+    bm.to_mesh(me)
+    bm.free()  # free and prevent further access
+    
+    me.validate()    
+    me.update()
+    
+    
+
+
 
           
 def process_stp_data():
