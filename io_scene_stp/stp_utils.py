@@ -854,7 +854,7 @@ def get_segments(data, gen_edges = False):
 
 def generate_planar_faces_from_outbound (instance, data, segment):
     segments = get_segments (data)
-    if segment["name"] == "CIRCLE":
+    if segment is not None and segment["name"] == "CIRCLE":
         if len(segments) == 1 and segments[0]["name"] == "CIRCLE":
             ca, cb = segment, segments[0]
             r1, r2 = ca["radi"], cb["radi"]
@@ -864,8 +864,10 @@ def generate_planar_faces_from_outbound (instance, data, segment):
                 print ("Not in concentric or in same plane")
         else:
             print ("Not perfomed")
-    else:
+    elif segment is not None:
         print ("Unknown planar surface to apply face bound")
+    else: 
+        print ("Missing segment to apply outbound")
     
 def generate_cylindrical_faces_from_outbound (instance, data):
     if not cylindrical_faces_from_outbound:
