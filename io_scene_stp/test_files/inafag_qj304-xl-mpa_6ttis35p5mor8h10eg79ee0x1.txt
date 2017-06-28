@@ -1,0 +1,14 @@
+﻿"Symbol";"Value";"Unit";
+"REFERENCE";"QJ304-XL-MPA";"";
+"TraceParts.PartVersion";"1.4.0";"";
+"SUPPLIER";"Schaeffler Technologies AG & Co. KG";"";
+"TraceParts.PartStatus";"Published";"";
+"TraceParts.PartNumber";"69-18092006-809166";"";
+"TraceParts.PartLanguage";"en";"";
+"DESIGN";"Four-point bearings";"";
+"TraceParts.InstanceId";"69-18092006-8091666N3LMQVZJHQ43BVMQKDK1F6XX";"";
+"TraceParts.PartTitle";"Four point contact bearings QJ3, main dimensions to DIN 628-4, separable, with split inner ring";"";
+"TRACEPARTS";"TRACEPARTS";"";
+"TraceParts.PartStatusId";"";"";
+"SELECTION";"QJ304-XL-MPA";"";
+"TraceParts.ClassPath";"INAFAG:/F_INAFAG/69-18092006-809166";"";

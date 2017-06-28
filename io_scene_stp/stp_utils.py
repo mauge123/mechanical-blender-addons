@@ -19,11 +19,10 @@
 # <pep8 compliant>
 
 """
-Import and export STP files
+Import STP files
 
-Used as a blender script, it load all the stl files in the scene:
+Author jaume bellet <mauge@bixo.org> at Tmaq <developer@tmaq.es>
 
-blender --python stp_utils.py -- file1.stl file2.stl file3.stl ...
 """
 
 import re
@@ -31,30 +30,89 @@ import bpy
 import numpy as np
 import math
 
-import pprint
-pp = pprint.PrettyPrinter(indent=4)
+'''
+File structure definition. Array in the following form
+structure["INSTANCE_NAME"] = "name_for_value1", "name_for_value2", ... 
 
+the values can be specified in the form
+
+specificication|name
+
+for data types are accepted int, float, str
+
+for instances, multiple instances can be set in the form
+
+instance_name1|instance_name2|....|name
+
+for values that have emdeded and instance or function, the specification is func|
+
+if the structure["INSTANCE_NAME"] is an array, it looks for a match according the number of values
+'''
 structure = {}
+
+'''
+Functions that are called during instance reading. defined as
+structure_func["INSTANCE_NAME"] = { "func_name" : function }
+
+The func_names can be "init", "load", and "first_load"
+'''
 structure_func = {}
+
+'''
+Defines params for the instance
+structure_params["INSTANCE_NAME"] = {"param_name" : value}
+
+The param_name can be "print_verbose"
+'''
 structure_params = {}
 
-instances = []
-data = []   # Instance blender data
 
+'''
+Loaded instances of the file
+each position of the array is an structure containing
+ "name" : Instance Name 
+ "params" : Instance params or values,  
+ "line" : full line of the instance, 
+ "data" : data of the instance, filled on instance_load
+ "number" : instance number (#X)}
+ 
+ "parent": reference to a parent instance, containinig {"parent", "var_name"}
+            in case of being accessed from multiple parents, it's an array
+
+instance[]["data"] contains the translated data of the instance, according instance params, and structure definition
+
+To print a instance for test and debug, use the funtion print_instance
+to get a instance value use the function get_instance_value
+
+'''
+instances = []
+
+'''
+vars for current object loading
+'''
 object_name = ""
 object_location = [0,0,0]
 vertexs = [] # Mesh Vertices
 edges = [] # Mesh Edges
 faces = [] # Mesh Faces
 
+'''
+defines a verbose to split out redundant data on print_instance
+'''
 print_verbose_level = 10
 
+'''
+enable / disable imports, for testing purposes
+'''
 torus_from_outbound = 1
 cylindrical_faces_from_outbound = 1
 circular_ring = 1
 
 ### UTILS ####
 
+'''
+dist from two points [3]
+'''
 def p3_p3_dist (a,b):
     return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
 
@@ -173,6 +231,9 @@ def read_stp_line(f):
 def get_instance_number(str):
     return int(str[1:])  #removes '#'
 
+'''
+adds a new instance to instances[]
+'''
 def add_instance (line, name, params, data, number):
     global instances;
     id = get_instance_number(number);
@@ -264,6 +325,11 @@ def fill_instance_data(instance, st):
                 instance["data"][n] = check_instance_value(instance, param, n_exp)
 
    
+'''
+loads and instance (fills instance[]["data"], following strucutre file info definition
+Will load recursive instance
+@param parent, var_name are used internally, should not be added by user call
+'''
 def load_instance(instance, parent = None, var_name = None):
     
     if instance["name"] in structure:
@@ -323,6 +389,12 @@ def load_instance(instance, parent = None, var_name = None):
 
     return instance
 
+'''
+gets instance value, loaded on intance data
+@param  instance
+@path  single string, or array of params names as defined in strucuture
+@index is used internally in recursion to get current value, should not be set by user
+'''
 def get_instance_value(instance,path, index=0):
     if isinstance(path, list): 
         if path[index] in instance["data"]:
@@ -338,10 +410,17 @@ def get_instance_value(instance,path, index=0):
         
     return value
 
-# Debug function
+'''
+debug function that print instance, and subinstances
+@param instance
+@param max_levels
+@name internally used on recursion should not be set by user
+@level internally used on recursion should not be ser by user
+'''
 def print_instance(instance, max_levels=-1, name = "", level =0):
     
     if level==0:
+        ## first call
         for ins in instances:
             ins["printed"] = False
     
@@ -387,6 +466,9 @@ def print_instance(instance, max_levels=-1, name = "", level =0):
     
     instance["printed"] = False
             
+'''
+debug function that prints the tree, to see the parent instances that are reaching the it.
+'''
 def get_instance_path (instance, level=0):
     path = instance["number"] + " " + instance["name"]
     if "parent" in instance and instance["parent"]:
@@ -399,6 +481,10 @@ def get_instance_path (instance, level=0):
             path = path + ">" + get_instance_path(instance["parent"]["instance"], level)
     return path
 
+'''
+debug function that prints the tree, to see the parent instances that are reaching the it.
+More info and better output layout than get_instance_path
+'''
 def print_instance_tree (instance, level=0, var_name = ""):
     spaces = ""
     i=0
@@ -472,7 +558,7 @@ def parse_stp_instance_multiple(instance, content, number):
                     #X = NAME(a,b,...);
                     n_params = []
                     parse_params(parsed[1],n_params)
-                    instance["multiple"].append({"name" : parsed[0], "params" : n_params, "number": number, "data" : data})
+                    instance["multiple"].append({"name" : parsed[0], "params" : n_params, "number": number, "data" : None})
                 else:
                     print ("Error on parse")
                 
@@ -615,20 +701,13 @@ def get_circle_verts(pm, r):
     
     verts = []
     prec = 32
-    #iv = len(vertexs)
     for i in range(0,prec):
         a = ((math.pi*2)/prec)*i
         v4 = [math.cos(a)*r,math.sin(a)*r, 0.0, 1.0]
         v4 = np.matmul(v4,pm)
                  
         verts.append(convert_v4_to_v3(v4))
-        #vertexs.append(v3)
-        #if i== 31:
-        #    edges.append([iv+i,iv])
-        #else:
-        #    edges.append([iv+i,iv+i+1])
         
-    #faces.append(range(iv,iv+32))
     return verts
     
  
@@ -636,7 +715,6 @@ def get_circle_verts(pm, r):
 def generate_circle_face (instance):
     if instance["name"] != "CIRCLE":
         return 
-    
     
     verts = get_circle_verts(
         get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement")),
@@ -885,7 +963,21 @@ def generate_cylindrical_faces_from_outbound (instance, data):
     
     
     
+'''
+adds a segment
+
+A segment could be consided a drawing element. A single segment or a set of segments could define a surface or an outbound
+the segments contains 
+    "name": tpye of segments, could be "ARC", "CIRCLE", "LINE"
+    "verts" : verts of the segment
+    "sign" : sign of the segments, because some segments could be inverted when joined with others, and must be know for directions
     
+Note that arc is not present in the structure, and is defined as circle and 2 points.
+
+@param segments
+@surf instance that contains segment info
+@edge_curve, optional, especifies start and end points
+''' 
 def append_to_segment(segments, surf, edge_curve):
     if surf["name"] == "CIRCLE":
         if edge_curve:
@@ -1087,6 +1179,7 @@ def generate_spherical_surface_from_outbound (instance, data):
     
     if len(segments) == 1:
         #Do not know what to do with
+        # Check the radi ??
         generate_spherical_surface (
             get_matrix_from_axis2_placement_3d(get_instance_value(instance,"placement")),
             get_instance_value(instance,"radi")
@@ -1145,7 +1238,7 @@ structure["SPHERICAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|placement", "flo
 structure["TOROIDAL_SURFACE"] = "unknown", "AXIS2_PLACEMENT_3D|axis2_placement3d", "float|r1", "float|r2"
 
 #X = SURFACE_OF_REVOLUTION('',#34,#39);
-structure["SURFACE_OF_REVOLUTION"] = "unknown", "circle|circle", "AXIS1_PLACEMENT_3D|axis"
+structure["SURFACE_OF_REVOLUTION"] = "unknown", "CIRCLE|circle", "AXIS1_PLACEMENT_3D|axis"
 
 
 #X = B_SPLINE_CURVE_WITH_KNOTS('',3,(#),.UNSPECIFIED.,.T.,.U.,(4),(0.0),.UNSPECIFIED.);
@@ -1262,7 +1355,6 @@ def process_face_bound(fb, face, obj):
 def process_face_outer_bound(fb, face, obj, bound):    
     #surf is a definet face_bound
     loop = get_instance_value(fb,"loop")
-    data = []
     global b
     if loop["name"] == "EDGE_LOOP":
         for oe in get_instance_value(fb,["loop","oriented_edges"]):
@@ -1574,7 +1666,8 @@ def import_data_to_blender():
 
           
 def process_stp_data():
-    
+    #found as parent nodes
+        
     for instance in instances:            
         if instance["name"] == "SHAPE_DEFINITION_REPRESENTATION":
             load_instance(instance)
